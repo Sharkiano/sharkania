@@ -1,0 +1,207 @@
+---
+// src/layouts/ClubAdminLayout.astro
+interface Props {
+  title: string;
+  clubName?: string;
+}
+
+const { title, clubName = 'Mi Club' } = Astro.props;
+const currentPath = Astro.url.pathname;
+
+const navItems = [
+  { href: '/club-admin',                  icon: '📊', label: 'Dashboard'        },
+  { href: '/club-admin/subir-resultados', icon: '⬆️', label: 'Subir Resultados' },
+  { href: '/club-admin/torneos',          icon: '🏆', label: 'Mis Torneos'      },
+  { href: '/club-admin/mi-club',          icon: '🏠', label: 'Mi Club'          },
+];
+---
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} — Club Admin | Sharkania</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/src/styles/global.css" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="admin-body">
+
+  <aside class="admin-sidebar" id="admin-sidebar" aria-label="Menú club administración">
+
+    <div class="sidebar-header">
+      <a href="/" class="logo-link" aria-label="Ir al sitio público">
+        <span class="logo-icon">🦈</span>
+        <span class="logo-text">Sharkania</span>
+      </a>
+      <span class="admin-badge club-badge">{clubName}</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      {navItems.map(item => (
+        <a
+          href={item.href}
+          class={`sidebar-link ${currentPath === item.href || currentPath.startsWith(item.href + '/') ? 'sidebar-link--active' : ''}`}
+        >
+          <span class="sidebar-icon" aria-hidden="true">{item.icon}</span>
+          <span class="sidebar-label">{item.label}</span>
+        </a>
+      ))}
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="/" class="sidebar-link">
+        <span class="sidebar-icon" aria-hidden="true">🌐</span>
+        <span class="sidebar-label">Ver sitio</span>
+      </a>
+      <a href="/api/auth/logout" class="sidebar-link sidebar-link--danger">
+        <span class="sidebar-icon" aria-hidden="true">🚪</span>
+        <span class="sidebar-label">Cerrar sesión</span>
+      </a>
+    </div>
+
+  </aside>
+
+  <div class="admin-content">
+
+    <header class="admin-topbar">
+      <button
+        class="sidebar-toggle"
+        id="sidebar-toggle"
+        aria-label="Toggle sidebar"
+        aria-expanded="true"
+        aria-controls="admin-sidebar"
+      >☰</button>
+      <h1 class="admin-page-title">{title}</h1>
+      <div class="topbar-right">
+        <span class="topbar-user">{clubName}</span>
+      </div>
+    </header>
+
+    <main class="admin-main" id="main-content">
+      <slot />
+    </main>
+
+  </div>
+
+</body>
+</html>
+
+<style>
+/* Reutiliza los mismos estilos que AdminLayout */
+.admin-body {
+  display: flex;
+  min-height: 100vh;
+  background: #0a0a0f;
+}
+
+.admin-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #12121a;
+  border-right: 1px solid rgba(108, 92, 231, 0.1);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0;
+  height: 100vh;
+  z-index: 50;
+  transition: transform 0.3s ease;
+}
+
+.admin-sidebar.is-collapsed { transform: translateX(-100%); }
+
+.sidebar-header {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.logo-link { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; }
+.logo-icon  { font-size: 1.25rem; }
+.logo-text  {
+  font-size: 1.1rem; font-weight: 800;
+  background: linear-gradient(135deg, #6c5ce7, #00cec9);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+.admin-badge {
+  display: inline-block; font-size: 0.7rem; font-weight: 600;
+  background: rgba(108, 92, 231, 0.2); color: #6c5ce7;
+  border: 1px solid rgba(108, 92, 231, 0.3);
+  padding: 2px 8px; border-radius: 20px; width: fit-content;
+}
+
+.club-badge {
+  background: rgba(0, 206, 201, 0.15);
+  color: #00cec9;
+  border-color: rgba(0, 206, 201, 0.3);
+}
+
+.sidebar-nav {
+  flex: 1; padding: 0.75rem;
+  display: flex; flex-direction: column; gap: 0.25rem; overflow-y: auto;
+}
+
+.sidebar-link {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.625rem 0.75rem; border-radius: 8px;
+  text-decoration: none; color: #8888a4;
+  font-size: 0.9rem; font-weight: 500; transition: all 0.2s ease;
+}
+
+.sidebar-link:hover         { color: #e4e4ef; background: rgba(108, 92, 231, 0.1); }
+.sidebar-link--active       { color: #e4e4ef; background: rgba(108, 92, 231, 0.15); border-left: 2px solid #6c5ce7; }
+.sidebar-link--danger:hover { color: #ff5252; background: rgba(255, 82, 82, 0.1); }
+.sidebar-icon { font-size: 1rem; flex-shrink: 0; }
+
+.sidebar-footer {
+  padding: 0.75rem;
+  border-top: 1px solid rgba(108, 92, 231, 0.1);
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+
+.admin-content {
+  flex: 1; margin-left: 240px;
+  display: flex; flex-direction: column; min-height: 100vh;
+  transition: margin-left 0.3s ease;
+}
+
+.admin-content.full-width { margin-left: 0; }
+
+.admin-topbar {
+  height: 60px;
+  background: rgba(18, 18, 26, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(108, 92, 231, 0.1);
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0 1.5rem; position: sticky; top: 0; z-index: 40;
+}
+
+.sidebar-toggle {
+  background: none; border: none; color: #8888a4;
+  font-size: 1.25rem; cursor: pointer; padding: 4px 8px;
+  border-radius: 6px; transition: all 0.2s ease;
+}
+.sidebar-toggle:hover { color: #e4e4ef; background: rgba(108, 92, 231, 0.1); }
+
+.admin-page-title { font-size: 1rem; font-weight: 600; color: #e4e4ef; margin: 0; }
+.topbar-right     { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
+.topbar-user      { font-size: 0.85rem; color: #8888a4; }
+.admin-main       { flex: 1; padding: 1.5rem; max-width: 1400px; width: 100%; }
+</style>
+
+<script>
+const toggle  = document.getElementById('sidebar-toggle');
+const sidebar = document.getElementById('admin-sidebar');
+const content = document.querySelector('.admin-content');
+
+toggle?.addEventListener('click', () => {
+  const isCollapsed = sidebar?.classList.toggle('is-collapsed');
+  content?.classList.toggle('full-width', isCollapsed);
+  toggle.setAttribute('aria-expanded', String(!isCollapsed));
+});
+</script>

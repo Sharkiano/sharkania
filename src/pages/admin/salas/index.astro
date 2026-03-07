@@ -1,0 +1,574 @@
+---
+// src/pages/admin/salas/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: rooms } = await supabase
+  .from('rooms')
+  .select('*')
+  .order('name');
+
+const activeCount   = rooms?.filter(r => r.is_active).length  ?? 0;
+const inactiveCount = rooms?.filter(r => !r.is_active).length ?? 0;
+---
+
+<AdminLayout title="Salas de Póker">
+
+  <!-- ── Header ───────────────────────────────────────── -->
+  <div class="page-header">
+    <div>
+      <p class="page-meta">
+        <span class="meta-badge meta-active">{activeCount} activas</span>
+        <span class="meta-badge meta-inactive">{inactiveCount} inactivas</span>
+      </p>
+    </div>
+    <button class="btn btn-primary" id="btn-nueva-sala">+ Nueva Sala</button>
+  </div>
+
+  <!-- ── Tabla de salas ────────────────────────────────── -->
+  <div class="glass-card table-card">
+    <table class="poker-table" id="rooms-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Nombre</th>
+          <th>Slug</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rooms-tbody">
+        {rooms && rooms.map(room => (
+          <tr id={`row-${room.id}`}>
+            <td class="text-mono text-secondary">{room.id}</td>
+            <td>
+              <div class="room-name-cell">
+                <span class="room-dot" style={`background:${room.is_active ? '#00e676' : '#55556a'}`}></span>
+                <span class="room-name">{room.name}</span>
+              </div>
+            </td>
+            <td><code class="slug-code">{room.slug}</code></td>
+            <td>
+              <span class={`status-badge ${room.is_active ? 'status-verified' : 'status-inactive'}`}>
+                {room.is_active ? '✓ Activa' : '✗ Inactiva'}
+              </span>
+            </td>
+            <td>
+              <div class="action-btns">
+                <button
+                  class="action-btn action-btn--edit"
+                  data-id={room.id}
+                  data-name={room.name}
+                  data-slug={room.slug}
+                  onclick="openEditModal(this)"
+                  aria-label={`Editar ${room.name}`}
+                >✏️</button>
+                <button
+                  class={`action-btn ${room.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
+                  data-id={room.id}
+                  data-active={String(room.is_active)}
+                  onclick="toggleRoom(this)"
+                  aria-label={room.is_active ? 'Desactivar' : 'Activar'}
+                >{room.is_active ? '⏸' : '▶'}</button>
+                <button
+                  class="action-btn action-btn--danger"
+                  data-id={room.id}
+                  data-name={room.name}
+                  onclick="deleteRoom(this)"
+                  aria-label={`Eliminar ${room.name}`}
+                >🗑</button>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Modal Nueva / Editar Sala ────────────────────── -->
+  <div class="modal-backdrop" id="modal-backdrop" aria-hidden="true">
+    <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-title">Nueva Sala</h3>
+        <button class="modal-close" id="modal-close" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="input-name" class="form-label">Nombre de la sala *</label>
+          <input
+            type="text"
+            id="input-name"
+            class="input-field"
+            placeholder="Ej: WPT Global"
+            maxlength="100"
+          />
+        </div>
+        <div class="form-group">
+          <label for="input-slug" class="form-label">
+            Slug *
+            <span class="label-hint">solo letras minúsculas, números y guiones</span>
+          </label>
+          <input
+            type="text"
+            id="input-slug"
+            class="input-field"
+            placeholder="Ej: wpt-global"
+            maxlength="100"
+          />
+          <span class="field-hint">Se usa en URLs. No se puede cambiar fácilmente después.</span>
+        </div>
+        <div class="modal-error" id="modal-error" role="alert"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="btn-guardar">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast ─────────────────────────────────────────── -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</AdminLayout>
+
+<style is:global>
+/* ── Page header ─────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.page-meta {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.meta-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.meta-active   { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.meta-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+
+/* ── Table card ──────────────────────────── */
+.table-card {
+  padding: 0;
+  overflow: hidden;
+  overflow-x: auto;
+}
+
+.room-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.room-name {
+  font-weight: 500;
+  color: #e4e4ef;
+}
+
+.slug-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  background: rgba(108, 92, 231, 0.1);
+  color: #8888a4;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.status-inactive {
+  background: rgba(85,85,106,0.2);
+  color: #8888a4;
+  border: 1px solid rgba(85,85,106,0.3);
+}
+
+/* ── Action buttons ──────────────────────── */
+.action-btns {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.action-btn--edit    { background: rgba(108,92,231,0.1); }
+.action-btn--edit:hover { background: rgba(108,92,231,0.25); }
+.action-btn--warning { background: rgba(255,215,64,0.1); }
+.action-btn--warning:hover { background: rgba(255,215,64,0.25); }
+.action-btn--success { background: rgba(0,230,118,0.1); }
+.action-btn--success:hover { background: rgba(0,230,118,0.25); }
+.action-btn--danger  { background: rgba(255,82,82,0.1); }
+.action-btn--danger:hover  { background: rgba(255,82,82,0.25); }
+
+/* ── Modal ───────────────────────────────── */
+.modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-backdrop.is-open {
+  display: flex;
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(108,92,231,0.15);
+}
+
+.modal-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #e4e4ef;
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #8888a4;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.modal-close:hover { background: rgba(255,82,82,0.1); color: #ff5252; }
+
+.modal-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #8888a4;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.label-hint {
+  font-size: 0.75rem;
+  color: #55556a;
+  font-weight: 400;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: #55556a;
+}
+
+.modal-error {
+  display: none;
+  background: rgba(255,82,82,0.1);
+  border: 1px solid rgba(255,82,82,0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: #ff5252;
+}
+
+.modal-error.is-visible { display: block; }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid rgba(108,92,231,0.1);
+}
+
+/* ── Toast ───────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast--success {
+  background: rgba(0,230,118,0.15);
+  border: 1px solid rgba(0,230,118,0.3);
+  color: #00e676;
+}
+
+.toast--error {
+  background: rgba(255,82,82,0.15);
+  border: 1px solid rgba(255,82,82,0.3);
+  color: #ff5252;
+}
+</style>
+
+<script>
+// ── Estado del modal ─────────────────────────────────────
+let editingId: number | null = null;
+
+const backdrop  = document.getElementById('modal-backdrop')!;
+const modalTitle = document.getElementById('modal-title')!;
+const inputName = document.getElementById('input-name') as HTMLInputElement;
+const inputSlug = document.getElementById('input-slug') as HTMLInputElement;
+const btnGuardar = document.getElementById('btn-guardar')!;
+const btnCancelar = document.getElementById('btn-cancelar')!;
+const btnClose   = document.getElementById('modal-close')!;
+const modalError = document.getElementById('modal-error')!;
+
+// ── Auto-generar slug desde nombre ───────────────────────
+inputName.addEventListener('input', () => {
+  if (editingId) return; // No auto-generar al editar
+  inputSlug.value = inputName.value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-');
+});
+
+// ── Abrir modal nueva sala ───────────────────────────────
+document.getElementById('btn-nueva-sala')?.addEventListener('click', () => {
+  editingId = null;
+  modalTitle.textContent = 'Nueva Sala';
+  inputName.value = '';
+  inputSlug.value = '';
+  hideError();
+  openModal();
+});
+
+// ── Abrir modal editar ───────────────────────────────────
+function openEditModal(btn: HTMLElement) {
+  editingId = Number(btn.dataset.id);
+  modalTitle.textContent = 'Editar Sala';
+  inputName.value = btn.dataset.name ?? '';
+  inputSlug.value = btn.dataset.slug ?? '';
+  hideError();
+  openModal();
+}
+
+// ── Toggle activo/inactivo ───────────────────────────────
+async function toggleRoom(btn: HTMLElement) {
+  const id       = Number(btn.dataset.id);
+  const isActive = btn.dataset.active === 'true';
+  const newState = !isActive;
+  const button   = btn as HTMLButtonElement;
+  button.disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/salas', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, is_active: newState }),
+    });
+    const data = await res.json() as { error?: string; room?: { is_active: boolean } };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al actualizar.', 'error');
+      return;
+    }
+
+    // Actualizar UI sin recargar
+    const row  = document.getElementById(`row-${id}`);
+    const dot  = row?.querySelector('.room-dot') as HTMLElement;
+    const badge = row?.querySelector('.status-badge') as HTMLElement;
+
+    btn.dataset.active = String(newState);
+    btn.textContent    = newState ? '⏸' : '▶';
+    btn.className      = `action-btn ${newState ? 'action-btn--warning' : 'action-btn--success'}`;
+
+    if (dot)   dot.style.background = newState ? '#00e676' : '#55556a';
+    if (badge) {
+      badge.textContent = newState ? '✓ Activa' : '✗ Inactiva';
+      badge.className   = `status-badge ${newState ? 'status-verified' : 'status-inactive'}`;
+    }
+
+    showToast(`Sala ${newState ? 'activada' : 'desactivada'} correctamente.`, 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ── Eliminar sala ────────────────────────────────────────
+async function deleteRoom(btn: HTMLElement) {
+  const id   = Number(btn.dataset.id);
+  const name = btn.dataset.name ?? 'esta sala';
+  const button = btn as HTMLButtonElement;
+
+  if (!confirm(`¿Eliminar "${name}"? Esta acción no se puede deshacer.`)) return;
+
+  button.disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/salas', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al eliminar.', 'error');
+      button.disabled = false;
+      return;
+    }
+
+    // Remover fila de la tabla
+    document.getElementById(`row-${id}`)?.remove();
+    showToast(`Sala "${name}" eliminada.`, 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+    button.disabled = false;
+  }
+}
+
+// ── Guardar (crear o editar) ─────────────────────────────
+btnGuardar.addEventListener('click', async () => {
+  const name = inputName.value.trim();
+  const slug = inputSlug.value.trim();
+
+  hideError();
+
+  if (!name || !slug) {
+    showError('Completá nombre y slug.');
+    return;
+  }
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    showError('El slug solo puede tener letras minúsculas, números y guiones.');
+    return;
+  }
+
+  btnGuardar.textContent = 'Guardando...';
+  (btnGuardar as HTMLButtonElement).disabled = true;
+
+  try {
+    const isEdit = editingId !== null;
+    const res    = await fetch('/api/admin/salas', {
+      method:  isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(isEdit ? { id: editingId, name, slug } : { name, slug }),
+    });
+
+    const data = await res.json() as { error?: string; room?: Record<string, unknown> };
+
+    if (!res.ok || data.error) {
+      showError(data.error ?? 'Error al guardar.');
+      return;
+    }
+
+    closeModal();
+    showToast(isEdit ? 'Sala actualizada.' : 'Sala creada correctamente.', 'success');
+
+    // Recargar la página para reflejar cambios
+    setTimeout(() => window.location.reload(), 800);
+
+  } finally {
+    btnGuardar.textContent = 'Guardar';
+    (btnGuardar as HTMLButtonElement).disabled = false;
+  }
+});
+
+// ── Helpers modal ────────────────────────────────────────
+function openModal()  { backdrop.classList.add('is-open');    backdrop.setAttribute('aria-hidden', 'false'); inputName.focus(); }
+function closeModal() { backdrop.classList.remove('is-open'); backdrop.setAttribute('aria-hidden', 'true');  }
+function showError(msg: string) { modalError.textContent = msg; modalError.classList.add('is-visible'); }
+function hideError()            { modalError.textContent = '';  modalError.classList.remove('is-visible'); }
+
+btnCancelar.addEventListener('click', closeModal);
+btnClose.addEventListener('click',    closeModal);
+backdrop.addEventListener('click', (e) => {
+  if (e.target === backdrop) closeModal();
+});
+
+// Cerrar con Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── Toast ────────────────────────────────────────────────
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+// Exponer funciones al scope global para los onclick del HTML
+(window as Window & typeof globalThis & {
+  openEditModal: typeof openEditModal;
+  toggleRoom: typeof toggleRoom;
+  deleteRoom: typeof deleteRoom;
+}).openEditModal = openEditModal;
+(window as Window & typeof globalThis & { toggleRoom: typeof toggleRoom }).toggleRoom = toggleRoom;
+(window as Window & typeof globalThis & { deleteRoom: typeof deleteRoom }).deleteRoom = deleteRoom;
+</script>

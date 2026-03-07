@@ -1,0 +1,389 @@
+---
+// src/pages/rankings/global.astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+const page     = Math.max(1, Number(Astro.url.searchParams.get('page') ?? 1));
+const limit    = 50;
+const offset   = (page - 1) * limit;
+
+const { data: players, count } = await supabase
+  .from('players')
+  .select(`
+    id, nickname, slug, elo_rating, peak_elo,
+    total_tournaments, total_first_places, total_podiums,
+    countries ( name, code, flag_emoji )
+  `, { count: 'exact' })
+  .eq('is_active', true)
+  .gt('total_tournaments', 0)
+  .order('elo_rating', { ascending: false })
+  .range(offset, offset + limit - 1);
+
+const totalPages  = Math.ceil((count ?? 0) / limit);
+const pageNumbers = Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1);
+
+function getEloBadge(elo: number) {
+  if (elo >= 1800) return { cls: 'tier-legend',  label: 'LEGEND'  };
+  if (elo >= 1600) return { cls: 'tier-master',  label: 'MASTER'  };
+  if (elo >= 1400) return { cls: 'tier-diamond', label: 'DIAMOND' };
+  if (elo >= 1300) return { cls: 'tier-gold',    label: 'GOLD'    };
+  if (elo >= 1200) return { cls: 'tier-silver',  label: 'SILVER'  };
+  if (elo >= 1100) return { cls: 'tier-bronze',  label: 'BRONZE'  };
+  return              { cls: 'tier-entry',   label: 'ENTRY'   };
+}
+
+function topClass(i: number) {
+  const globalRank = offset + i;
+  if (globalRank === 0) return 'top-1';
+  if (globalRank === 1) return 'top-2';
+  if (globalRank === 2) return 'top-3';
+  return '';
+}
+
+function rankNum(i: number) {
+  return String(offset + i + 1).padStart(2, '0');
+}
+
+function rankClass(tc: string) {
+  if (tc === 'top-1') return 'r-num gold';
+  if (tc === 'top-2') return 'r-num silver';
+  if (tc === 'top-3') return 'r-num bronze';
+  return 'r-num';
+}
+---
+
+<PublicLayout
+  title="Ranking Global ELO"
+  description="El ranking global ELO del póker hispano. Los mejores jugadores de Argentina, Chile, México, España y toda Latinoamérica."
+>
+
+<section class="ranking-page">
+  <div class="section-wrap">
+
+    <!-- Header -->
+    <div class="page-header">
+      <div>
+        <div class="section-eyebrow">CLASIFICACIÓN MUNDIAL</div>
+        <h1 class="section-title">RANKING GLOBAL</h1>
+      </div>
+      <div class="header-meta">
+        <span class="total-badge">{count ?? 0} JUGADORES</span>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-crystal">
+      <div class="t-head">
+        <span>POS</span>
+        <span>JUGADOR</span>
+        <span class="col-tier">TIER</span>
+        <span>ELO</span>
+        <span class="col-stat">PEAK</span>
+        <span class="col-stat">TORNEOS</span>
+        <span class="col-stat">VICTORIAS</span>
+        <span class="col-stat">PODIOS</span>
+      </div>
+
+      <div class="t-body">
+        {players?.map((p, i) => {
+          const country = p.countries as { name: string; flag_emoji: string; code: string } | null;
+          const badge   = getEloBadge(p.elo_rating ?? 1200);
+          const tc      = topClass(i);
+          const rc      = rankClass(tc);
+          return (
+            <a href={`/jugador/${p.slug}`} class={`t-row ${tc}`}>
+              <div><span class={rc}>{rankNum(i)}</span></div>
+              <div class="p-cell">
+                <span class="p-flag">{country?.flag_emoji ?? ''}</span>
+                <div class="p-info">
+                  <span class="p-nick">{p.nickname}</span>
+                  <span class="p-country">{country?.name ?? ''}</span>
+                </div>
+              </div>
+              <div class="col-tier">
+                <span class={`tier ${badge.cls}`}>{badge.label}</span>
+              </div>
+              <div><span class="elo-val">{p.elo_rating ?? 1200}</span></div>
+              <div><span class="s-val col-stat">{p.peak_elo ?? 1200}</span></div>
+              <div><span class="s-val col-stat">{p.total_tournaments ?? 0}</span></div>
+              <div><span class="s-val col-stat">{p.total_first_places ?? 0}</span></div>
+              <div><span class="s-val col-stat">{p.total_podiums ?? 0}</span></div>
+            </a>
+          );
+        })}
+        {(!players || players.length === 0) && (
+          <div class="t-empty">NO HAY JUGADORES RANKEADOS AÚN</div>
+        )}
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    {totalPages > 1 && (
+      <div class="pagination">
+        {page > 1 && (
+          <a href={`/rankings/global?page=${page - 1}`} class="page-btn">
+            ANTERIOR
+          </a>
+        )}
+        <div class="page-numbers">
+          {pageNumbers.map(pageNum => (
+            <a
+              href={`/rankings/global?page=${pageNum}`}
+              class={pageNum === page ? 'page-num page-num--active' : 'page-num'}
+            >
+              {pageNum}
+            </a>
+          ))}
+        </div>
+        {page < totalPages && (
+          <a href={`/rankings/global?page=${page + 1}`} class="page-btn">
+            SIGUIENTE
+          </a>
+        )}
+      </div>
+    )}
+
+  </div>
+</section>
+
+</PublicLayout>
+
+<style>
+.ranking-page { padding: 3rem 0 6rem; }
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1.75rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.total-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 6px 14px;
+  border-radius: 50px;
+  backdrop-filter: blur(8px);
+}
+
+.table-crystal {
+  position: relative;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.5),
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.15);
+}
+
+.table-crystal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 5%; right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,0.55) 25%,
+    rgba(255,255,255,0.85) 50%,
+    rgba(255,255,255,0.55) 75%, transparent
+  );
+  z-index: 2;
+  pointer-events: none;
+}
+
+.table-crystal::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -1px;
+  width: 3px; height: 100%;
+  background: linear-gradient(180deg,
+    rgba(41,121,255,0.7), rgba(0,229,255,0.4),
+    rgba(41,121,255,0.2), transparent
+  );
+  border-radius: 14px 0 0 14px;
+}
+
+.t-head {
+  display: grid;
+  grid-template-columns: 72px 1fr 120px 100px 90px 90px 90px 90px;
+  padding: 1rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.t-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.4);
+}
+
+.t-body { display: flex; flex-direction: column; }
+
+.t-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 120px 100px 90px 90px 90px 90px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 62px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.t-row:hover { background: rgba(255,255,255,0.05); }
+
+.t-row::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), rgba(255,255,255,0.06), transparent);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.t-row:hover::after { left: 140%; }
+
+.t-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.25s;
+  z-index: 1;
+}
+
+.t-row:hover::before { height: 65%; }
+
+.t-row.top-1 { background: linear-gradient(90deg, rgba(232,197,90,0.09) 0%, rgba(232,197,90,0.03) 40%, transparent 70%); }
+.t-row.top-1::before { height: 65%; background: linear-gradient(180deg, #e8c55a, #f7e08a); box-shadow: 0 0 12px rgba(232,197,90,0.5); }
+.t-row.top-2 { background: linear-gradient(90deg, rgba(180,195,210,0.07) 0%, transparent 60%); }
+.t-row.top-2::before { height: 65%; background: linear-gradient(180deg, #b0c4d8, #d8e8f5); }
+.t-row.top-3 { background: linear-gradient(90deg, rgba(200,140,90,0.07) 0%, transparent 60%); }
+.t-row.top-3::before { height: 65%; background: linear-gradient(180deg, #c88050, #e0aa7a); }
+
+.r-num        { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 800; color: rgba(255,255,255,0.18); }
+.r-num.gold   { font-size: 1.2rem; background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 8px rgba(232,197,90,0.5)); }
+.r-num.silver { font-size: 1.1rem; background: linear-gradient(180deg, #e0eefc, #90afc8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.r-num.bronze { background: linear-gradient(180deg, #e0aa7a, #a06030); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+.p-cell   { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+.p-flag   { font-size: 1.2rem; flex-shrink: 0; }
+.p-info   { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.p-nick   { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.t-row:hover .p-nick { color: var(--accent2); }
+.p-country { font-family: 'Barlow Condensed', sans-serif; font-size: 0.64rem; color: rgba(255,255,255,0.22); text-transform: uppercase; }
+
+.elo-val { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 700; color: #fff; }
+.t-row.top-1 .elo-val { background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 6px rgba(232,197,90,0.4)); }
+.s-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--text-dim); }
+
+.t-empty { padding: 4rem; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 0.85rem; letter-spacing: 0.18em; color: rgba(255,255,255,0.2); }
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent2);
+  text-decoration: none;
+  background: rgba(0,229,255,0.07);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 10px 20px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+
+.page-btn:hover {
+  background: rgba(0,229,255,0.14);
+  border-color: rgba(0,229,255,0.4);
+}
+
+.page-numbers {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.page-num {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-decoration: none;
+  width: 36px; height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.page-num:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.1);
+}
+
+.page-num--active {
+  color: var(--accent2);
+  background: rgba(0,229,255,0.1);
+  border-color: rgba(0,229,255,0.25);
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .t-head, .t-row { grid-template-columns: 60px 1fr 110px 90px 80px; }
+  .col-stat { display: none; }
+}
+
+@media (max-width: 768px) {
+  .t-head, .t-row { grid-template-columns: 50px 1fr 85px; }
+  .col-tier, .col-stat { display: none; }
+}
+/* ── Fixes visibilidad ─── */
+.t-head span {
+  color: rgba(0,229,255,0.85);
+}
+.p-country {
+  color: rgba(255,255,255,0.55);
+}
+.r-num {
+  color: rgba(255,255,255,0.5);
+}
+.s-val {
+  color: rgba(255,255,255,0.7);
+}
+</style>
+</PublicLayout>

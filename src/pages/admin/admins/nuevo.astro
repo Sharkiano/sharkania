@@ -1,0 +1,200 @@
+---
+// src/pages/admin/admins/nuevo.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+const { data: clubs } = await supabase
+  .from('clubs')
+  .select('id, name')
+  .eq('is_active', true)
+  .order('name');
+---
+
+<AdminLayout title="Nuevo Admin">
+
+  <div class="page-header">
+    <a href="/admin/admins" class="btn btn-secondary">← Volver</a>
+  </div>
+
+  <div class="glass-card form-card">
+
+    <h2 class="form-section-title">Datos del Admin</h2>
+
+    <div class="form-grid">
+
+      <div class="form-group">
+        <label for="name" class="form-label">Nombre completo *</label>
+        <input type="text" id="name" class="input-field" placeholder="Ej: Juan Pérez" maxlength="100" />
+      </div>
+
+      <div class="form-group">
+        <label for="email" class="form-label">Email *</label>
+        <input type="email" id="email" class="input-field" placeholder="juan@club.com" />
+      </div>
+
+      <div class="form-group">
+        <label for="password" class="form-label">
+          Contraseña temporal *
+          <span class="label-hint">mín. 8 caracteres</span>
+        </label>
+        <div class="password-wrap">
+          <input type="password" id="password" class="input-field" placeholder="••••••••" />
+          <button type="button" class="password-toggle" id="pwd-toggle" aria-label="Mostrar">👁</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="role" class="form-label">Rol *</label>
+        <select id="role" class="input-field select-field">
+          <option value="club_admin">🏠 Admin de Club</option>
+          <option value="super_admin">⭐ Super Admin</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="club-group">
+        <label for="club_id" class="form-label">Club asignado *</label>
+        <select id="club_id" class="input-field select-field">
+          <option value="">— Seleccionar club —</option>
+          {clubs?.map(c => (
+            <option value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <span class="field-hint">El admin solo podrá gestionar este club.</span>
+      </div>
+
+    </div>
+
+    <!-- Info box -->
+    <div class="info-box">
+      <span class="info-icon">ℹ️</span>
+      <div>
+        <p class="info-title">Credenciales de acceso</p>
+        <p class="info-text">
+          El admin podrá loguearse en <code>/club-admin/login</code> con el email y contraseña que definas aquí.
+          Se recomienda que cambie la contraseña en su primer ingreso.
+        </p>
+      </div>
+    </div>
+
+    <div class="form-error" id="form-error" role="alert"></div>
+
+    <div class="form-actions">
+      <a href="/admin/admins" class="btn btn-secondary">Cancelar</a>
+      <button class="btn btn-primary" id="btn-guardar">Crear Admin</button>
+    </div>
+
+  </div>
+
+</AdminLayout>
+
+<style is:global>
+.form-card       { padding: 2rem; max-width: 800px; }
+.form-section-title { font-size: 1rem; font-weight: 600; color: #e4e4ef; margin: 0 0 1.25rem; }
+.form-grid       { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+.form-group      { display: flex; flex-direction: column; gap: 0.4rem; }
+.form-label      { font-size: 0.85rem; font-weight: 500; color: #8888a4; display: flex; align-items: center; gap: 0.5rem; }
+.label-hint      { font-size: 0.75rem; color: #55556a; font-weight: 400; }
+.field-hint      { font-size: 0.75rem; color: #55556a; }
+.select-field    { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
+.password-wrap   { position: relative; }
+.password-wrap .input-field { padding-right: 42px; }
+.password-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1rem; padding: 4px; opacity: 0.5; transition: opacity 0.2s; }
+.password-toggle:hover { opacity: 1; }
+.form-error      { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-top: 1rem; }
+.form-error.is-visible { display: block; }
+.form-actions    { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
+
+.info-box {
+  display: flex;
+  gap: 0.75rem;
+  background: rgba(68, 138, 255, 0.08);
+  border: 1px solid rgba(68, 138, 255, 0.2);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.info-icon  { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.info-title { font-size: 0.85rem; font-weight: 600; color: #448aff; margin: 0 0 0.25rem; }
+.info-text  { font-size: 0.82rem; color: #8888a4; margin: 0; line-height: 1.5; }
+.info-text code { font-family: 'JetBrains Mono', monospace; background: rgba(68,138,255,0.1); padding: 1px 6px; border-radius: 4px; font-size: 0.8rem; }
+</style>
+
+<script>
+const roleSelect = document.getElementById('role')       as HTMLSelectElement;
+const clubGroup  = document.getElementById('club-group') as HTMLDivElement;
+const pwdToggle  = document.getElementById('pwd-toggle') as HTMLButtonElement;
+const pwdInput   = document.getElementById('password')   as HTMLInputElement;
+const formError  = document.getElementById('form-error') as HTMLDivElement;
+const btnGuardar = document.getElementById('btn-guardar') as HTMLButtonElement;
+
+// Mostrar/ocultar campo club según rol
+roleSelect.addEventListener('change', () => {
+  clubGroup.style.display = roleSelect.value === 'super_admin' ? 'none' : 'flex';
+});
+
+// Toggle password
+pwdToggle.addEventListener('click', () => {
+  const isPassword = pwdInput.type === 'password';
+  pwdInput.type        = isPassword ? 'text' : 'password';
+  pwdToggle.textContent = isPassword ? '🙈' : '👁';
+});
+
+btnGuardar.addEventListener('click', async () => {
+  const name     = (document.getElementById('name')    as HTMLInputElement).value.trim();
+  const email    = (document.getElementById('email')   as HTMLInputElement).value.trim();
+  const password = pwdInput.value;
+  const role     = roleSelect.value as 'super_admin' | 'club_admin';
+  const club_id  = Number((document.getElementById('club_id') as HTMLSelectElement).value) || null;
+
+  formError.classList.remove('is-visible');
+
+  if (!name || !email || !password) {
+    formError.textContent = 'Nombre, email y contraseña son requeridos.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  if (password.length < 8) {
+    formError.textContent = 'La contraseña debe tener al menos 8 caracteres.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  if (role === 'club_admin' && !club_id) {
+    formError.textContent = 'Seleccioná un club para este admin.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  btnGuardar.disabled    = true;
+  btnGuardar.textContent = 'Creando...';
+
+  try {
+    const res = await fetch('/api/admin/admins', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, email, password, role, club_id }),
+    });
+
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      formError.textContent = data.error ?? 'Error al crear el admin.';
+      formError.classList.add('is-visible');
+      return;
+    }
+
+    window.location.href = '/admin/admins';
+  } catch {
+    formError.textContent = 'Error de conexión.';
+    formError.classList.add('is-visible');
+  } finally {
+    btnGuardar.disabled    = false;
+    btnGuardar.textContent = 'Crear Admin';
+  }
+});
+</script>

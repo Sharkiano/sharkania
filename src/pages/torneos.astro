@@ -1,0 +1,305 @@
+---
+// src/pages/torneos.astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: torneos } = await supabase
+  .from('tournaments')
+  .select(`
+    id, name, date, total_players, buy_in, currency, prize_pool,
+    clubs   ( name, slug ),
+    leagues ( name, slug ),
+    rooms   ( name )
+  `)
+  .eq('is_verified', true)
+  .order('date', { ascending: false })
+  .limit(200);
+
+type Torneo = {
+  id: number;
+  name: string;
+  date: string;
+  total_players: number;
+  buy_in: number | null;
+  currency: string | null;
+  prize_pool: number | null;
+  clubName: string;
+  clubSlug: string;
+  leagueName: string;
+  leagueSlug: string;
+  roomName: string;
+};
+
+const processed: Torneo[] = (torneos ?? []).map((t: any) => ({
+  id:           t.id,
+  name:         t.name,
+  date:         t.date,
+  total_players: t.total_players,
+  buy_in:       t.buy_in,
+  currency:     t.currency ?? 'USD',
+  prize_pool:   t.prize_pool,
+  clubName:     t.clubs?.name  ?? '',
+  clubSlug:     t.clubs?.slug  ?? '',
+  leagueName:   t.leagues?.name ?? '',
+  leagueSlug:   t.leagues?.slug ?? '',
+  roomName:     t.rooms?.name  ?? '',
+}));
+
+function fmtDate(d: string) {
+  return new Date(d + 'T12:00:00').toLocaleDateString('es-CL', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  }).toUpperCase();
+}
+
+function fmtPrize(amount: number | null, currency: string | null) {
+  if (!amount) return '—';
+  return new Intl.NumberFormat('es-CL', {
+    style: 'currency', currency: currency ?? 'USD',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
+  }).format(amount);
+}
+---
+
+<PublicLayout
+  title="Torneos de póker"
+  description="Historial completo de torneos verificados en Sharkiana. Resultados, premios y clasificaciones de clubes online de habla hispana."
+>
+
+<section class="torneos-page">
+  <div class="section-wrap">
+
+    <div class="page-header">
+      <div>
+        <div class="section-eyebrow">HISTORIAL</div>
+        <h1 class="section-title">TORNEOS</h1>
+      </div>
+      <span class="total-badge">{processed.length} TORNEOS</span>
+    </div>
+
+    {processed.length > 0 ? (
+      <div class="table-crystal">
+        <table class="t-table">
+          <thead>
+            <tr class="t-head">
+              <th>FECHA</th>
+              <th class="th-left">TORNEO</th>
+              <th class="th-left th-club">CLUB</th>
+              <th class="th-left th-league">LIGA</th>
+              <th>JUGADORES</th>
+              <th>PREMIO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {processed.map(t => (
+              <tr class="t-row" onclick={`window.location='/torneo/${t.id}'`} style="cursor:pointer">
+                <td class="col-date">{fmtDate(t.date)}</td>
+                <td class="col-name">
+                  <span class="t-name">{t.name}</span>
+                  {t.roomName && <span class="t-room">{t.roomName}</span>}
+                </td>
+                <td class="col-club th-club">
+                  {t.clubSlug
+                    ? <a href={`/club/${t.clubSlug}`} class="t-link" onclick="event.stopPropagation()">{t.clubName}</a>
+                    : <span class="t-dim">{t.clubName}</span>
+                  }
+                </td>
+                <td class="col-league th-league">
+                  {t.leagueSlug
+                    ? <a href={`/rankings/${t.leagueSlug}`} class="t-link t-league" onclick="event.stopPropagation()">{t.leagueName}</a>
+                    : <span class="t-dim">—</span>
+                  }
+                </td>
+                <td class="col-center">
+                  <span class="s-val">{t.total_players}</span>
+                </td>
+                <td class="col-center">
+                  <span class="s-val prize">{fmtPrize(t.prize_pool, t.currency)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div class="empty-state crystal">
+        <p class="empty-text">NO HAY TORNEOS REGISTRADOS AÚN</p>
+      </div>
+    )}
+
+  </div>
+</section>
+
+</PublicLayout>
+
+<style>
+.torneos-page { padding: 3rem 0 6rem; }
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.total-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 6px 14px;
+  border-radius: 50px;
+  backdrop-filter: blur(8px);
+}
+
+/* Table */
+.table-crystal {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.t-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Anchos de columna */
+.t-table th:nth-child(1), .t-table td:nth-child(1) { width: 120px; }
+.t-table th:nth-child(2), .t-table td:nth-child(2) { width: auto; }
+.t-table th:nth-child(3), .t-table td:nth-child(3) { width: 160px; }
+.t-table th:nth-child(4), .t-table td:nth-child(4) { width: 160px; }
+.t-table th:nth-child(5), .t-table td:nth-child(5) { width: 90px; }
+.t-table th:nth-child(6), .t-table td:nth-child(6) { width: 110px; }
+
+.t-head {
+  background: rgba(41,121,255,0.08);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.t-head th {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  padding: 12px 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.t-head .th-left { text-align: left; }
+
+.t-row {
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+
+.t-row:last-child { border-bottom: none; }
+.t-row:hover { background: rgba(41,121,255,0.06); }
+
+.t-row td {
+  padding: 12px 12px;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.col-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.66rem;
+  color: rgba(255,255,255,0.65);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.col-name {
+  text-align: left;
+}
+
+.t-name {
+  display: block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.t-room {
+  display: inline-block;
+  margin-top: 3px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 1px 7px;
+  border-radius: 20px;
+}
+
+.col-club, .col-league { text-align: left; }
+
+.t-link {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent2);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.t-link:hover { opacity: 1; text-decoration: underline; }
+.t-league { color: #c4b5fd; }
+
+.t-dim {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.5);
+}
+
+.col-center { text-align: center; }
+
+.s-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.s-val.prize {
+  color: #fcd34d;
+  font-size: 0.78rem;
+}
+
+/* Empty */
+.empty-state { padding: 4rem; text-align: center; }
+.empty-text {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.18);
+}
+
+@media (max-width: 900px) {
+  .th-club, .col-club, .th-league, .col-league { display: none; }
+  .t-table th:nth-child(1), .t-table td:nth-child(1) { width: 90px; }
+  .t-table th:nth-child(5), .t-table td:nth-child(5) { width: 70px; }
+  .t-table th:nth-child(6), .t-table td:nth-child(6) { width: 90px; }
+}
+
+@media (max-width: 600px) {
+  .t-table th:nth-child(6), .t-table td:nth-child(6) { display: none; }
+}
+</style>

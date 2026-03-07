@@ -1,0 +1,222 @@
+---
+// src/pages/admin/clubes/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: clubs } = await supabase
+  .from('clubs')
+  .select(`
+    *,
+    countries ( name, flag_emoji ),
+    rooms     ( name )
+  `)
+  .order('name');
+
+const activeCount   = clubs?.filter(c => c.is_active).length  ?? 0;
+const inactiveCount = clubs?.filter(c => !c.is_active).length ?? 0;
+---
+
+<AdminLayout title="Clubes">
+
+  <div class="page-header">
+    <div>
+      <p class="page-meta">
+        <span class="meta-badge meta-active">{activeCount} activos</span>
+        <span class="meta-badge meta-inactive">{inactiveCount} inactivos</span>
+      </p>
+    </div>
+    <a href="/admin/clubes/nuevo" class="btn btn-primary">+ Nuevo Club</a>
+  </div>
+
+  <div class="glass-card table-card">
+  {clubs && clubs.length > 0 && (
+    <table class="poker-table" id="clubs-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Club</th>
+          <th>País</th>
+          <th>Sala</th>
+          <th>Slug</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {clubs.map(club => {
+          const country = club.countries as { flag_emoji: string; name: string } | null;
+          const room    = club.rooms     as { name: string } | null;
+          return (
+            <tr id={`row-${club.id}`}>
+              <td class="text-mono text-secondary">{club.id}</td>
+              <td>
+                <div class="club-name-cell">
+                  <div class="club-avatar">{club.name.charAt(0).toUpperCase()}</div>
+                  <div>
+                    <div class="club-name">{club.name}</div>
+                    {club.description && (
+                      <div class="club-desc">{club.description.slice(0, 50)}{club.description.length > 50 ? '…' : ''}</div>
+                    )}
+                  </div>
+                </div>
+              </td>
+              <td>{country ? <span>{country.flag_emoji} {country.name}</span> : <span class="text-muted">—</span>}</td>
+              <td class="text-secondary">{room ? room.name : <span class="text-muted">—</span>}</td>
+              <td><code class="slug-code">{club.slug}</code></td>
+              <td>
+                <span class={`status-badge ${club.is_active ? 'status-verified' : 'status-inactive'}`}>
+                  {club.is_active ? '✓ Activo' : '✗ Inactivo'}
+                </span>
+              </td>
+              <td>
+                <div class="action-btns">
+                  <a href={`/admin/clubes/${club.id}`} class="action-btn action-btn--edit" aria-label={`Editar ${club.name}`}>✏️</a>
+                  <button
+                    class={`action-btn ${club.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
+                    data-id={club.id}
+                    data-active={String(club.is_active)}
+                    onclick="toggleClub(this)"
+                  >{club.is_active ? '⏸' : '▶'}</button>
+                  <button
+                    class="action-btn action-btn--danger"
+                    data-id={club.id}
+                    data-name={club.name}
+                    onclick="deleteClub(this)"
+                  >🗑</button>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  )}
+  {(!clubs || clubs.length === 0) && (
+    <div class="empty-state" style="padding:3rem;">
+      <p style="font-size:2rem;margin:0;">🏠</p>
+      <p>No hay clubes creados aún.</p>
+      <a href="/admin/clubes/nuevo" class="btn btn-primary" style="margin-top:0.75rem;">Crear primer club</a>
+    </div>
+  )}
+</div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</AdminLayout>
+
+<style is:global>
+.club-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.club-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.club-name {
+  font-weight: 500;
+  color: #e4e4ef;
+  font-size: 0.9rem;
+}
+
+.club-desc {
+  font-size: 0.78rem;
+  color: #55556a;
+  margin-top: 1px;
+}
+
+.text-muted { color: #55556a; }
+</style>
+
+<script>
+async function toggleClub(btn: HTMLElement) {
+  const id       = Number(btn.dataset.id);
+  const isActive = btn.dataset.active === 'true';
+  const newState = !isActive;
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/clubes', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, is_active: newState }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al actualizar.', 'error');
+      return;
+    }
+
+    const row   = document.getElementById(`row-${id}`);
+    const badge = row?.querySelector('.status-badge') as HTMLElement;
+
+    btn.dataset.active = String(newState);
+    btn.textContent    = newState ? '⏸' : '▶';
+    btn.className      = `action-btn ${newState ? 'action-btn--warning' : 'action-btn--success'}`;
+    if (badge) {
+      badge.textContent = newState ? '✓ Activo' : '✗ Inactivo';
+      badge.className   = `status-badge ${newState ? 'status-verified' : 'status-inactive'}`;
+    }
+
+    showToast(`Club ${newState ? 'activado' : 'desactivado'}.`, 'success');
+  } finally {
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+async function deleteClub(btn: HTMLElement) {
+  const id   = Number(btn.dataset.id);
+  const name = btn.dataset.name ?? 'este club';
+
+  if (!confirm(`¿Eliminar "${name}"? Esta acción no se puede deshacer.`)) return;
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/clubes', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al eliminar.', 'error');
+      (btn as HTMLButtonElement).disabled = false;
+      return;
+    }
+
+    document.getElementById(`row-${id}`)?.remove();
+    showToast(`Club "${name}" eliminado.`, 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+(window as unknown as Record<string, unknown>).toggleClub = toggleClub;
+(window as unknown as Record<string, unknown>).deleteClub = deleteClub;
+</script>

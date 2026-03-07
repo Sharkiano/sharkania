@@ -1,0 +1,999 @@
+---
+// src/pages/comparar.astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const slugA = Astro.url.searchParams.get('a') ?? '';
+const slugB = Astro.url.searchParams.get('b') ?? '';
+
+type PlayerFull = {
+  id: number; nickname: string; slug: string;
+  elo_rating: number; peak_elo: number;
+  total_tournaments: number; total_first_places: number;
+  total_podiums: number; total_final_tables: number;
+  first_seen: string | null; last_seen: string | null;
+  countries: { name: string; flag_emoji: string } | null;
+};
+
+type TournamentResult = {
+  position: number; prize: number | null; elo_change: number | null;
+  elo_after: number | null;
+  tournaments: { id: number; name: string; date: string; total_players: number; buy_in: number | null; clubs: { name: string } | null } | null;
+};
+
+async function fetchPlayer(slug: string): Promise<PlayerFull | null> {
+  if (!slug) return null;
+  const { data } = await supabase
+    .from('players')
+    .select('id, nickname, slug, elo_rating, peak_elo, total_tournaments, total_first_places, total_podiums, total_final_tables, first_seen, last_seen, countries(name, flag_emoji)')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .single();
+  return data as PlayerFull | null;
+}
+
+async function fetchResults(playerId: number): Promise<TournamentResult[]> {
+  const { data } = await supabase
+    .from('tournament_results')
+    .select('position, prize, elo_change, elo_before, elo_after, tournaments(id, name, date, total_players, buy_in, clubs(name))')
+    .eq('player_id', playerId)
+    .order('tournaments(date)', { ascending: true });
+  return (data ?? []) as TournamentResult[];
+}
+
+const playerA = await fetchPlayer(slugA);
+const playerB = await fetchPlayer(slugB);
+
+const resultsA = playerA ? await fetchResults(playerA.id) : [];
+const resultsB = playerB ? await fetchResults(playerB.id) : [];
+
+const avgOpponentEloA = playerA ? await fetchAvgOpponentElo(playerA.id, resultsA) : 0;
+const avgOpponentEloB = playerB ? await fetchAvgOpponentElo(playerB.id, resultsB) : 0;
+
+// ELO promedio de los rivales en los torneos del jugador
+async function fetchAvgOpponentElo(playerId: number, results: TournamentResult[]): Promise<number> {
+  const tournamentIds = results
+    .map(r => r.tournaments?.id)
+    .filter((id): id is number => id !== null && id !== undefined);
+  if (tournamentIds.length === 0) return 0;
+  const { data } = await supabase
+    .from('tournament_results')
+    .select('elo_before, tournament_id')
+    .in('tournament_id', tournamentIds)
+    .neq('player_id', playerId)
+    .not('elo_before', 'is', null);
+  if (!data || data.length === 0) return 0;
+  const total = data.reduce((s, r) => s + (r.elo_before ?? 0), 0);
+  return Math.round(total / data.length);
+}
+
+// Estadísticas calculadas
+function calcStats(player: PlayerFull | null, results: TournamentResult[]) {
+  if (!player) return null;
+  const total = results.length;
+  const avgPos = total > 0 ? (results.reduce((s, r) => s + r.position, 0) / total) : 0;
+  // Rendimiento relativo promedio: misma fórmula interna del ELO
+  // #1 de 100 = top 1% = 99.0 | #10 de 100 = top 10% = 90.9 | #50 de 100 = top 50% = 50.5
+  const relPerfs = results
+    .filter(r => r.tournaments?.total_players && r.tournaments.total_players > 1)
+    .map(r => (1 - (r.position - 1) / (r.tournaments!.total_players - 1)) * 100);
+  const avgRelPerf = relPerfs.length > 0 ? relPerfs.reduce((s, v) => s + v, 0) / relPerfs.length : 0;
+  const bestPos = total > 0 ? Math.min(...results.map(r => r.position)) : null;
+  const itm = results.filter(r => r.prize && r.prize > 0).length;
+  const itmPct = total > 0 ? Math.round((itm / total) * 100) : 0;
+  const totalPrize = results.reduce((s, r) => s + (r.prize ?? 0), 0);
+  const wins = player.total_first_places;
+  const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : '0';
+  // Racha actual (consecutivos en top 3)
+  const sorted = [...results].sort((a, b) => {
+    const da = a.tournaments?.date ?? '';
+    const db = b.tournaments?.date ?? '';
+    return db.localeCompare(da);
+  });
+  let currentStreak = 0;
+  for (const r of sorted) {
+    if (r.position <= 3) currentStreak++;
+    else break;
+  }
+  // ELO history para gráfico
+  const eloHistory = results
+    .filter(r => r.elo_after && r.tournaments?.date)
+    .map(r => ({ date: r.tournaments!.date, elo: r.elo_after! }));
+  // Avg buy-in (solo torneos con buy_in > 0)
+  const buyIns = results.filter(r => r.tournaments?.buy_in && r.tournaments.buy_in > 0).map(r => r.tournaments!.buy_in!);
+  const avgBuyIn = buyIns.length > 0 ? buyIns.reduce((s, v) => s + v, 0) / buyIns.length : 0;
+  // Tamaño promedio del campo (total_players por torneo)
+  const fields = results.filter(r => r.tournaments?.total_players && r.tournaments.total_players > 0).map(r => r.tournaments!.total_players);
+  const avgField = fields.length > 0 ? Math.round(fields.reduce((s, v) => s + v, 0) / fields.length) : 0;
+  return { avgPos: avgPos.toFixed(1), bestPos, itm, itmPct, totalPrize, winRate, currentStreak, eloHistory, avgBuyIn, avgRelPerf, avgField };
+}
+
+const statsA = calcStats(playerA, resultsA);
+const statsB = calcStats(playerB, resultsB);
+
+// Torneos en común
+const commonTournaments = (() => {
+  if (!playerA || !playerB) return [];
+  const idsA = new Map(resultsA.map(r => [r.tournaments?.id, r]));
+  return resultsB
+    .filter(r => r.tournaments?.id && idsA.has(r.tournaments.id))
+    .map(r => {
+      const rA = idsA.get(r.tournaments!.id)!;
+      return {
+        id: r.tournaments!.id,
+        name: r.tournaments!.name,
+        date: r.tournaments!.date,
+        club: (r.tournaments!.clubs as any)?.name ?? '',
+        posA: rA.position,
+        posB: r.position,
+        winner: rA.position < r.position ? 'A' : rA.position > r.position ? 'B' : 'TIE',
+      };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 20);
+})();
+
+const winsA = commonTournaments.filter(t => t.winner === 'A').length;
+const winsB = commonTournaments.filter(t => t.winner === 'B').length;
+
+function tier(elo: number) {
+  if (elo > 1800) return { label: 'Leyenda', cls: 'tier-legend' };
+  if (elo > 1600) return { label: 'Master',  cls: 'tier-master' };
+  if (elo > 1400) return { label: 'Diamante',cls: 'tier-diamond' };
+  if (elo > 1300) return { label: 'Oro',     cls: 'tier-gold' };
+  if (elo > 1200) return { label: 'Plata',   cls: 'tier-silver' };
+  if (elo > 1100) return { label: 'Bronce',  cls: 'tier-bronze' };
+  return { label: 'Aspirante', cls: 'tier-iron' };
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return '—';
+  const [y, m, day] = d.split('-');
+  const months = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+  return `${day} ${months[parseInt(m)-1]} ${y}`;
+}
+
+// Serializar datos ELO para el gráfico
+const eloDataA = statsA?.eloHistory ?? [];
+const eloDataB = statsB?.eloHistory ?? [];
+
+// Comparar stat: quién gana
+function winner(valA: number, valB: number, lowerIsBetter = false) {
+  if (valA === valB) return 'tie';
+  if (lowerIsBetter) return valA < valB ? 'A' : 'B';
+  return valA > valB ? 'A' : 'B';
+}
+
+// Credenciales públicas para autocomplete en cliente
+const supabaseUrl  = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseAnon = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+// Tipo para las filas de stats — definido aquí para evitar cast en JSX
+type StatRow = {
+  label: string;
+  tooltip: string;
+  valA: number;
+  valB: number;
+  fmt: (v: number) => string;
+  w: string;
+  highlight?: boolean;
+};
+
+const statRows: StatRow[] = [
+  {
+    label: 'ELO Actual',
+    tooltip: 'Rating ELO actual del jugador. Refleja su nivel global considerando resultados, tamaño de campos y calidad de rivales. Parte de 1200.',
+    valA: playerA?.elo_rating ?? 0, valB: playerB?.elo_rating ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.elo_rating ?? 0, playerB?.elo_rating ?? 0),
+  },
+  {
+    label: 'ELO Máximo',
+    tooltip: 'El ELO más alto que alcanzó el jugador en toda su carrera. Refleja su mejor momento histórico.',
+    valA: playerA?.peak_elo ?? 0, valB: playerB?.peak_elo ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.peak_elo ?? 0, playerB?.peak_elo ?? 0),
+  },
+  {
+    label: 'ELO Ganado',
+    tooltip: 'Puntos ELO acumulados desde el rating inicial de 1200. Muestra cuánto ha crecido el jugador desde su debut.',
+    valA: (playerA?.elo_rating ?? 1200) - 1200, valB: (playerB?.elo_rating ?? 1200) - 1200,
+    fmt: (v) => (v >= 0 ? '+' : '') + v,
+    w: winner((playerA?.elo_rating ?? 1200) - 1200, (playerB?.elo_rating ?? 1200) - 1200),
+  },
+  {
+    label: 'Torneos',
+    tooltip: 'Total de torneos jugados registrados en la plataforma. Más torneos da más estabilidad al rating, pero no lo infla directamente.',
+    valA: playerA?.total_tournaments ?? 0, valB: playerB?.total_tournaments ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.total_tournaments ?? 0, playerB?.total_tournaments ?? 0),
+  },
+  {
+    label: 'Victorias',
+    tooltip: 'Cantidad de torneos ganados (primer lugar). Es el logro más valorado en el sistema ELO.',
+    valA: playerA?.total_first_places ?? 0, valB: playerB?.total_first_places ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.total_first_places ?? 0, playerB?.total_first_places ?? 0),
+  },
+  {
+    label: 'Podios',
+    tooltip: 'Veces que terminó entre los 3 primeros lugares. Indicador de consistencia en resultados de alto nivel.',
+    valA: playerA?.total_podiums ?? 0, valB: playerB?.total_podiums ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.total_podiums ?? 0, playerB?.total_podiums ?? 0),
+  },
+  {
+    label: 'Mesas Finales',
+    tooltip: 'Veces que llegó a la mesa final (aprox. top 10% del campo). Refleja consistencia para sobrevivir torneos largos.',
+    valA: playerA?.total_final_tables ?? 0, valB: playerB?.total_final_tables ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(playerA?.total_final_tables ?? 0, playerB?.total_final_tables ?? 0),
+  },
+  {
+    label: '% Win Rate',
+    tooltip: 'Porcentaje de victorias sobre el total de torneos jugados. Un jugador con 3 wins en 10 torneos tiene 30% — mucho mejor que 5 wins en 50.',
+    valA: parseFloat(statsA?.winRate ?? '0'), valB: parseFloat(statsB?.winRate ?? '0'),
+    fmt: (v) => v.toFixed(1) + '%',
+    w: winner(parseFloat(statsA?.winRate ?? '0'), parseFloat(statsB?.winRate ?? '0')),
+  },
+  {
+    label: 'ITM %',
+    tooltip: 'In The Money: porcentaje de torneos en los que cobró premio. Mide consistencia para llegar a posiciones pagadas.',
+    valA: statsA?.itmPct ?? 0, valB: statsB?.itmPct ?? 0,
+    fmt: (v) => v + '%',
+    w: winner(statsA?.itmPct ?? 0, statsB?.itmPct ?? 0),
+  },
+  {
+    label: 'Mejor Posición',
+    tooltip: 'La mejor posición que logró en un único torneo dentro de la plataforma.',
+    valA: statsA?.bestPos ?? 0, valB: statsB?.bestPos ?? 0,
+    fmt: (v) => v === 0 ? '—' : '#' + v,
+    w: winner(statsA?.bestPos ?? 999, statsB?.bestPos ?? 999, true),
+  },
+  {
+    label: 'Racha Podios',
+    tooltip: 'Torneos consecutivos más recientes terminando en top 3. Una racha activa indica la forma actual del jugador.',
+    valA: statsA?.currentStreak ?? 0, valB: statsB?.currentStreak ?? 0,
+    fmt: (v) => v.toString(),
+    w: winner(statsA?.currentStreak ?? 0, statsB?.currentStreak ?? 0),
+  },
+  {
+    label: 'Avg Buy-In',
+    tooltip: 'Buy-in promedio de los torneos jugados. Un buy-in más alto indica que el jugador compite en campos más exigentes y premiados.',
+    valA: statsA?.avgBuyIn ?? 0, valB: statsB?.avgBuyIn ?? 0,
+    fmt: (v) => v === 0 ? '—' : '$' + v.toFixed(0),
+    w: winner(statsA?.avgBuyIn ?? 0, statsB?.avgBuyIn ?? 0),
+  },
+  {
+    label: 'Campo Promedio',
+    tooltip: 'Promedio de jugadores por torneo. Campos más grandes generan más ELO al ganar y pesan más en el cálculo del rating (factor logarítmico).',
+    valA: statsA?.avgField ?? 0, valB: statsB?.avgField ?? 0,
+    fmt: (v) => v === 0 ? '—' : v + ' jug.',
+    w: winner(statsA?.avgField ?? 0, statsB?.avgField ?? 0),
+  },
+  {
+    label: 'Calidad Rivales',
+    tooltip: 'ELO promedio de todos los oponentes enfrentados. Ganarle a rivales con rating alto otorga más ELO que ganarle a novatos.',
+    valA: avgOpponentEloA, valB: avgOpponentEloB,
+    fmt: (v) => v === 0 ? '—' : v.toString(),
+    w: winner(avgOpponentEloA, avgOpponentEloB),
+  },
+  {
+    label: 'Rendimiento',
+    tooltip: 'Posición relativa promedio en cada torneo. Salir 10° de 100 = top 10%. Salir 2° de 10 = top 10% también. Compara rendimiento real sin importar el tamaño del campo. Es la métrica central del sistema ELO.',
+    valA: statsA?.avgRelPerf ?? 0, valB: statsB?.avgRelPerf ?? 0,
+    fmt: (v) => v === 0 ? '—' : 'top ' + (100 - v).toFixed(1) + '%',
+    w: winner(statsA?.avgRelPerf ?? 0, statsB?.avgRelPerf ?? 0),
+    highlight: true,
+  },
+];
+---
+<PublicLayout title="Comparador de Jugadores — Sharkiana">
+<div class="section-wrap">
+  <!-- Breadcrumb -->
+  <nav class="bc">
+    <a href="/" class="bc-link">RANKING</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">COMPARADOR</span>
+  </nav>
+
+  <div class="page-header">
+    <div class="ph-label">ANÁLISIS</div>
+    <h1 class="ph-title">COMPARADOR</h1>
+    <p class="ph-sub">Enfrenta dos jugadores y analiza su rendimiento histórico</p>
+  </div>
+
+  <!-- Selector de jugadores -->
+  <div class="selector-wrap">
+    <div class="selector-card" id="selector-a">
+      <div class="sel-label">JUGADOR A</div>
+      {playerA ? (
+        <div class="sel-player sel-player-a">
+          <div class="sel-avatar sel-avatar-a">{playerA.nickname.slice(0,2).toUpperCase()}</div>
+          <div class="sel-info">
+            <span class="sel-nick">{playerA.nickname}</span>
+            <span class="sel-country">{playerA.countries?.flag_emoji} {playerA.countries?.name ?? '—'}</span>
+          </div>
+          <a href={`/comparar?a=&b=${slugB}`} class="sel-clear">✕</a>
+        </div>
+      ) : (
+        <div class="sel-empty">
+          <div class="sel-search-wrap">
+            <input type="text" class="sel-input" placeholder="Buscar jugador..." id="searchA" autocomplete="off" />
+            <div class="sel-dropdown" id="dropdownA"></div>
+          </div>
+          <div class="sel-hint">Escribe para buscar</div>
+        </div>
+      )}
+    </div>
+
+    <div class="vs-badge">
+      <span>VS</span>
+    </div>
+
+    <div class="selector-card" id="selector-b">
+      <div class="sel-label">JUGADOR B</div>
+      {playerB ? (
+        <div class="sel-player sel-player-b">
+          <div class="sel-avatar sel-avatar-b">{playerB.nickname.slice(0,2).toUpperCase()}</div>
+          <div class="sel-info">
+            <span class="sel-nick">{playerB.nickname}</span>
+            <span class="sel-country">{playerB.countries?.flag_emoji} {playerB.countries?.name ?? '—'}</span>
+          </div>
+          <a href={`/comparar?a=${slugA}&b=`} class="sel-clear">✕</a>
+        </div>
+      ) : (
+        <div class="sel-empty">
+          <div class="sel-search-wrap">
+            <input type="text" class="sel-input" placeholder="Buscar jugador..." id="searchB" autocomplete="off" />
+            <div class="sel-dropdown" id="dropdownB"></div>
+          </div>
+          <div class="sel-hint">Escribe para buscar</div>
+        </div>
+      )}
+    </div>
+  </div>
+
+  {playerA && playerB ? (
+    <div class="compare-body">
+
+      <!-- ── CABECERA JUGADORES ── -->
+      <div class="players-header">
+        <div class="ph-card ph-card-a">
+          <div class="phc-avatar phc-a">{playerA.nickname.slice(0,2).toUpperCase()}</div>
+          <div class="phc-data">
+            <a href={`/jugador/${playerA.slug}`} class="phc-nick">{playerA.nickname}</a>
+            <div class="phc-country">{playerA.countries?.flag_emoji} {playerA.countries?.name ?? '—'}</div>
+            <div class={`phc-tier ${tier(playerA.elo_rating).cls}`}>{tier(playerA.elo_rating).label}</div>
+          </div>
+          <div class="phc-elo">
+            <span class="phc-elo-val">{playerA.elo_rating}</span>
+            <span class="phc-elo-lbl">ELO</span>
+          </div>
+        </div>
+
+        <!-- Head-to-head badge -->
+        {commonTournaments.length > 0 && (
+          <div class="h2h-badge">
+            <div class="h2h-score">
+              <span class="h2h-num h2h-a">{winsA}</span>
+              <span class="h2h-sep">—</span>
+              <span class="h2h-num h2h-b">{winsB}</span>
+            </div>
+            <div class="h2h-label">HEAD TO HEAD</div>
+            <div class="h2h-sub">{commonTournaments.length} torneos en común</div>
+          </div>
+        )}
+
+        <div class="ph-card ph-card-b">
+          <div class="phc-elo phc-elo-right">
+            <span class="phc-elo-val">{playerB.elo_rating}</span>
+            <span class="phc-elo-lbl">ELO</span>
+          </div>
+          <div class="phc-data phc-data-right">
+            <a href={`/jugador/${playerB.slug}`} class="phc-nick">{playerB.nickname}</a>
+            <div class="phc-country">{playerB.countries?.flag_emoji} {playerB.countries?.name ?? '—'}</div>
+            <div class={`phc-tier ${tier(playerB.elo_rating).cls}`}>{tier(playerB.elo_rating).label}</div>
+          </div>
+          <div class="phc-avatar phc-b">{playerB.nickname.slice(0,2).toUpperCase()}</div>
+        </div>
+      </div>
+
+      <!-- ── GRÁFICO ELO COMPARATIVO ── -->
+      {(eloDataA.length > 0 || eloDataB.length > 0) && (
+        <div class="section-block">
+          <div class="sb-label">EVOLUCIÓN</div>
+          <h2 class="sb-title">HISTORIAL ELO</h2>
+          <div class="chart-wrap">
+            <canvas id="eloChart"></canvas>
+          </div>
+        </div>
+      )}
+
+      <!-- ── ESTADÍSTICAS CARA A CARA ── -->
+      <div class="section-block">
+        <div class="sb-label">RENDIMIENTO</div>
+        <h2 class="sb-title">ESTADÍSTICAS</h2>
+
+        <div class="stats-grid">
+          {statRows.map(stat => (
+            <div class={`stat-row ${stat.highlight ? 'stat-row-highlight' : ''}`}>
+              <div class={`stat-val stat-val-a ${stat.w === 'A' ? 'stat-winner' : stat.w === 'tie' ? 'stat-tie' : 'stat-loser'}`}>
+                {stat.fmt(stat.valA)}
+                {stat.w === 'A' && <span class="stat-arrow">◀</span>}
+              </div>
+              <div class="stat-label stat-label-info">
+                {stat.label}
+                <span class="info-btn" data-tooltip={stat.tooltip}>ⓘ</span>
+              </div>
+              <div class={`stat-val stat-val-b ${stat.w === 'B' ? 'stat-winner' : stat.w === 'tie' ? 'stat-tie' : 'stat-loser'}`}>
+                {stat.w === 'B' && <span class="stat-arrow">▶</span>}
+                {stat.fmt(stat.valB)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <!-- ── TORNEOS EN COMÚN ── -->
+      {commonTournaments.length > 0 && (
+        <div class="section-block">
+          <div class="sb-label">ENFRENTAMIENTOS</div>
+          <h2 class="sb-title">TORNEOS EN COMÚN</h2>
+          <div class="h2h-table-wrap">
+            <div class="h2h-head">
+              <span class="hh-nick-a">{playerA.nickname}</span>
+              <span>TORNEO</span>
+              <span>FECHA</span>
+              <span class="hh-nick-b">{playerB.nickname}</span>
+            </div>
+            {commonTournaments.map(t => (
+              <a href={`/torneo/${t.id}`} class={`h2h-row ${t.winner === 'A' ? 'h2h-win-a' : t.winner === 'B' ? 'h2h-win-b' : 'h2h-tie'}`}>
+                <span class={`h2h-pos ${t.winner === 'A' ? 'pos-winner' : ''}`}>#{t.posA}</span>
+                <span class="h2h-tname">{t.name}<span class="h2h-club">{t.club}</span></span>
+                <span class="h2h-date">{fmtDate(t.date)}</span>
+                <span class={`h2h-pos ${t.winner === 'B' ? 'pos-winner' : ''}`}>#{t.posB}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+    </div>
+  ) : (playerA || playerB) ? (
+    <div class="waiting-wrap">
+      <div class="waiting-icon">🃏</div>
+      <div class="waiting-text">Selecciona un segundo jugador para comparar</div>
+    </div>
+  ) : (
+    <div class="waiting-wrap">
+      <div class="waiting-icon">⚔️</div>
+      <div class="waiting-text">Selecciona dos jugadores para comenzar</div>
+    </div>
+  )}
+</div>
+</PublicLayout>
+
+<!-- Chart.js -->
+<script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<script define:vars={{ eloDataA, eloDataB, nickA: playerA?.nickname ?? '', nickB: playerB?.nickname ?? '' }}>
+function initChart() {
+  if (typeof Chart === 'undefined') { setTimeout(initChart, 50); return; }
+  const canvas = document.getElementById('eloChart');
+  if (!canvas) return;
+
+  // Unir todas las fechas y ordenar
+  const allDates = [...new Set([...eloDataA.map(d => d.date), ...eloDataB.map(d => d.date)])].sort();
+
+  // Interpolar valores para fechas donde no hay datos
+  function buildSeries(data) {
+    if (!data.length) return [];
+    const map = new Map(data.map(d => [d.date, d.elo]));
+    let last = data[0].elo;
+    return allDates.map(date => {
+      if (map.has(date)) { last = map.get(date); return last; }
+      // Solo mostrar null si antes de primer punto
+      if (date < data[0].date) return null;
+      return last;
+    });
+  }
+
+  const seriesA = buildSeries(eloDataA);
+  const seriesB = buildSeries(eloDataB);
+
+  const labels = allDates.map(d => {
+    const [y, m, day] = d.split('-');
+    const months = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+    return `${day} ${months[parseInt(m)-1]}`;
+  });
+
+  const ctx = canvas.getContext('2d');
+
+  // Gradientes
+  const gradA = ctx.createLinearGradient(0, 0, 0, 400);
+  gradA.addColorStop(0, 'rgba(108,92,231,0.4)');
+  gradA.addColorStop(1, 'rgba(108,92,231,0)');
+
+  const gradB = ctx.createLinearGradient(0, 0, 0, 400);
+  gradB.addColorStop(0, 'rgba(0,206,201,0.4)');
+  gradB.addColorStop(1, 'rgba(0,206,201,0)');
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: nickA,
+          data: seriesA,
+          borderColor: '#6c5ce7',
+          backgroundColor: gradA,
+          borderWidth: 2.5,
+          pointRadius: allDates.length > 30 ? 2 : 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#6c5ce7',
+          tension: 0.4,
+          fill: true,
+          spanGaps: true,
+        },
+        {
+          label: nickB,
+          data: seriesB,
+          borderColor: '#00cec9',
+          backgroundColor: gradB,
+          borderWidth: 2.5,
+          pointRadius: allDates.length > 30 ? 2 : 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#00cec9',
+          tension: 0.4,
+          fill: true,
+          spanGaps: true,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            color: 'rgba(255,255,255,0.75)',
+            font: { family: "'Barlow Condensed', sans-serif", size: 13, weight: '700' },
+            usePointStyle: true,
+            pointStyleWidth: 12,
+          },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(18,18,26,0.95)',
+          borderColor: 'rgba(108,92,231,0.3)',
+          borderWidth: 1,
+          titleColor: 'rgba(255,255,255,0.9)',
+          bodyColor: 'rgba(255,255,255,0.75)',
+          padding: 12,
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y} ELO`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: 'rgba(255,255,255,0.5)',
+            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            maxTicksLimit: 12,
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          border: { color: 'rgba(255,255,255,0.1)' },
+        },
+        y: {
+          ticks: {
+            color: 'rgba(255,255,255,0.5)',
+            font: { family: "'JetBrains Mono', monospace", size: 11 },
+          },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          border: { color: 'rgba(255,255,255,0.1)' },
+        },
+      },
+    },
+  });
+}
+document.addEventListener('DOMContentLoaded', initChart);
+</script>
+
+<!-- Autocomplete directo a Supabase REST API -->
+<script define:vars={{ supabaseUrl, supabaseAnon, currentSlugA: slugA, currentSlugB: slugB }}>
+document.addEventListener('DOMContentLoaded', () => {
+
+  function setupSearch(inputId, dropdownId, side) {
+    const input    = document.getElementById(inputId);
+    const dropdown = document.getElementById(dropdownId);
+    if (!input || !dropdown) return;
+
+    let timer = null;
+
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        return;
+      }
+      timer = setTimeout(async () => {
+        try {
+          // Llamada directa a Supabase REST API — no depende de ningún endpoint propio
+          const url = supabaseUrl
+            + '/rest/v1/players'
+            + '?select=nickname,slug,elo_rating,countries(flag_emoji,name)'
+            + '&nickname=ilike.*' + encodeURIComponent(q) + '*'
+            + '&is_active=eq.true'
+            + '&order=elo_rating.desc'
+            + '&limit=7';
+
+          const res = await fetch(url, {
+            headers: {
+              'apikey': supabaseAnon,
+              'Authorization': 'Bearer ' + supabaseAnon,
+              'Accept': 'application/json',
+            }
+          });
+
+          const players = await res.json();
+
+          if (!Array.isArray(players) || players.length === 0) {
+            dropdown.innerHTML = '<div class="sd-empty">Sin resultados</div>';
+            dropdown.style.display = 'block';
+            return;
+          }
+
+          // Construir items con createElement para evitar problemas de escape en Astro
+          dropdown.innerHTML = '';
+          players.forEach(p => {
+            const flag     = (p.countries && p.countries.flag_emoji) ? p.countries.flag_emoji : '';
+            const sA       = side === 'A' ? p.slug : currentSlugA;
+            const sB       = side === 'B' ? p.slug : currentSlugB;
+            const a        = document.createElement('a');
+            a.className    = 'sd-item';
+            a.href         = '/comparar?a=' + sA + '&b=' + sB;
+
+            const av       = document.createElement('span');
+            av.className   = 'sd-avatar';
+            av.textContent = p.nickname.slice(0,2).toUpperCase();
+
+            const nick     = document.createElement('span');
+            nick.className = 'sd-nick';
+            nick.textContent = p.nickname.toUpperCase();
+
+            const fl       = document.createElement('span');
+            fl.className   = 'sd-flag';
+            fl.textContent = flag;
+
+            const elo      = document.createElement('span');
+            elo.className  = 'sd-elo';
+            elo.textContent = p.elo_rating + ' ELO';
+
+            a.append(av, nick, fl, elo);
+            dropdown.appendChild(a);
+          });
+          dropdown.style.display = 'block';
+
+        } catch(err) {
+          console.error('Autocomplete error:', err);
+        }
+      }, 220);
+    });
+
+    // Cerrar al click fuera
+    document.addEventListener('click', e => {
+      if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    // Cerrar con Escape
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { dropdown.style.display = 'none'; }
+    });
+  }
+
+  setupSearch('searchA', 'dropdownA', 'A');
+  setupSearch('searchB', 'dropdownB', 'B');
+});
+</script>
+
+<style>
+/* ── Variables ── */
+:root {
+  --bg1: #0a0a0f;
+  --bg2: #12121a;
+  --bg3: #1a1a2e;
+  --accent:  #6c5ce7;
+  --accent2: #00cec9;
+  --success: #00e676;
+  --danger:  #ff5252;
+  --text1: #e4e4ef;
+  --text2: rgba(255,255,255,0.6);
+  --text3: rgba(255,255,255,0.35);
+}
+
+/* ── Breadcrumb ── */
+.bc { display: flex; align-items: center; gap: 8px; padding: 24px 0 4px; }
+.bc-link { font-family: 'Barlow Condensed', sans-serif; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.18em; color: var(--text2); text-decoration: none; text-transform: uppercase; transition: color 0.2s; }
+.bc-link:hover { color: var(--accent2); }
+.bc-sep  { font-size: 0.65rem; color: rgba(255,255,255,0.5); }
+.bc-current { font-family: 'Barlow Condensed', sans-serif; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.18em; color: var(--accent2); text-transform: uppercase; }
+
+/* ── Page header ── */
+.page-header { padding: 12px 0 32px; }
+.ph-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.3em; color: var(--accent2); text-transform: uppercase; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ph-label::before { content: ''; display: block; width: 28px; height: 2px; background: var(--accent2); }
+.ph-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1; margin: 0 0 8px; }
+.ph-sub { font-size: 0.85rem; color: var(--text2); margin: 0; }
+
+/* ── Selector de jugadores ── */
+.selector-wrap {
+  display: grid;
+  grid-template-columns: 1fr 80px 1fr;
+  gap: 0;
+  align-items: center;
+  margin-bottom: 40px;
+}
+.selector-card {
+  background: var(--bg2);
+  border: 1px solid rgba(108,92,231,0.15);
+  border-radius: 16px;
+  padding: 20px 24px;
+  min-height: 100px;
+}
+.selector-card:first-child { border-right: none; border-radius: 16px 0 0 16px; }
+.selector-card:last-child  { border-left: none; border-radius: 0 16px 16px 0; }
+
+.sel-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.25em; color: var(--text3); text-transform: uppercase; margin-bottom: 10px; }
+
+.sel-player { display: flex; align-items: center; gap: 14px; }
+.sel-avatar  { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-family: 'Barlow Condensed', sans-serif; font-size: 1.1rem; font-weight: 800; flex-shrink: 0; }
+.sel-avatar-a { background: linear-gradient(135deg, #6c5ce7, #a855f7); color: #fff; }
+.sel-avatar-b { background: linear-gradient(135deg, #00cec9, #00b4b0); color: #fff; }
+.sel-info { flex: 1; min-width: 0; }
+.sel-nick { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 1.1rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-country { font-size: 0.75rem; color: var(--text2); }
+.sel-clear { color: var(--text3); text-decoration: none; font-size: 0.85rem; padding: 4px 8px; border-radius: 6px; transition: all 0.2s; }
+.sel-clear:hover { color: var(--danger); background: rgba(255,82,82,0.1); }
+
+.sel-empty { display: flex; flex-direction: column; gap: 8px; }
+.sel-search-wrap { position: relative; }
+.sel-input {
+  width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; padding: 10px 14px; color: #fff; font-family: inherit; font-size: 0.9rem;
+  outline: none; box-sizing: border-box; transition: border-color 0.2s;
+}
+.sel-input:focus { border-color: rgba(108,92,231,0.5); }
+.sel-input::placeholder { color: var(--text3); }
+.sel-hint { font-size: 0.72rem; color: var(--text3); }
+
+/* Dropdown autocomplete */
+.sel-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1e1e2e; border: 1px solid rgba(108,92,231,0.25); border-radius: 10px; z-index: 100; display: none; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.sel-dropdown.open { display: block; }
+.sd-item { display: grid; grid-template-columns: 34px 1fr 24px auto; align-items: center; gap: 10px; padding: 10px 14px; text-decoration: none; transition: background 0.15s; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sd-item:last-child { border-bottom: none; }
+.sd-item:hover { background: rgba(108,92,231,0.12); }
+.sd-avatar { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, #6c5ce7, #a855f7); display: flex; align-items: center; justify-content: center; font-family: 'Barlow Condensed', sans-serif; font-size: 0.7rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.sd-nick { font-family: 'Barlow Condensed', sans-serif; font-size: 0.9rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-flag { font-size: 1rem; text-align: center; }
+.sd-elo  { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent2); white-space: nowrap; }
+.sd-empty { padding: 14px 16px; font-size: 0.8rem; color: var(--text3); }
+
+/* VS Badge */
+.vs-badge {
+  display: flex; align-items: center; justify-content: center;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6c5ce7, #00cec9);
+  box-shadow: 0 0 30px rgba(108,92,231,0.4), 0 0 60px rgba(0,206,201,0.2);
+  z-index: 2; justify-self: center; align-self: center;
+}
+.vs-badge span { font-family: 'Barlow Condensed', sans-serif; font-size: 1.4rem; font-weight: 900; color: #fff; letter-spacing: 0.05em; }
+
+/* ── Compare body ── */
+.compare-body { display: flex; flex-direction: column; gap: 40px; }
+
+/* ── Players header ── */
+.players-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 20px;
+  align-items: center;
+}
+.ph-card {
+  background: var(--bg2);
+  border: 1px solid rgba(108,92,231,0.15);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.ph-card-b { flex-direction: row-reverse; }
+.phc-avatar { width: 60px; height: 60px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 900; flex-shrink: 0; }
+.phc-a { background: linear-gradient(135deg, #6c5ce7, #a855f7); color: #fff; box-shadow: 0 0 20px rgba(108,92,231,0.4); }
+.phc-b { background: linear-gradient(135deg, #00cec9, #00b4b0); color: #fff; box-shadow: 0 0 20px rgba(0,206,201,0.4); }
+.phc-data { flex: 1; min-width: 0; }
+.phc-data-right { text-align: right; }
+.phc-nick { font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 800; color: #fff; text-transform: uppercase; text-decoration: none; display: block; transition: color 0.2s; }
+.phc-nick:hover { color: var(--accent2); }
+.phc-country { font-size: 0.78rem; color: var(--text2); margin: 2px 0; }
+.phc-tier { display: inline-block; font-family: 'Barlow Condensed', sans-serif; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.15em; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; margin-top: 4px; }
+.phc-elo { text-align: center; }
+.phc-elo-right { text-align: center; }
+.phc-elo-val { display: block; font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; color: #fff; line-height: 1; }
+.phc-elo-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.2em; color: var(--text3); text-transform: uppercase; }
+
+/* H2H Badge */
+.h2h-badge { text-align: center; }
+.h2h-score { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.h2h-num { font-family: 'Barlow Condensed', sans-serif; font-size: 2.5rem; font-weight: 900; line-height: 1; }
+.h2h-num.h2h-a { color: #a78bf5; }
+.h2h-num.h2h-b { color: #00cec9; }
+.h2h-sep { font-family: 'Barlow Condensed', sans-serif; font-size: 1.5rem; color: var(--text3); }
+.h2h-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.25em; color: var(--text3); text-transform: uppercase; }
+.h2h-sub { font-size: 0.72rem; color: var(--text2); margin-top: 2px; }
+
+/* ── Section block ── */
+.section-block { background: var(--bg2); border: 1px solid rgba(108,92,231,0.12); border-radius: 16px; padding: 28px 28px 24px; }
+.sb-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.28em; color: var(--accent2); text-transform: uppercase; margin-bottom: 4px; }
+.sb-title { font-family: 'Barlow Condensed', sans-serif; font-size: 1.4rem; font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 24px; }
+
+/* ── Gráfico ── */
+.chart-wrap { height: 280px; }
+
+/* ── Stats grid ── */
+.stats-grid { display: flex; flex-direction: column; gap: 2px; }
+.stat-row { display: grid; grid-template-columns: 1fr 180px 1fr; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.stat-row:last-child { border-bottom: none; }
+.stat-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text2); text-transform: uppercase; text-align: center; }
+.stat-val { font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 8px; transition: color 0.2s; }
+.stat-val-a { justify-content: flex-end; }
+.stat-val-b { justify-content: flex-start; }
+.stat-winner { color: #fff; }
+.stat-loser  { color: rgba(255,255,255,0.35); }
+.stat-tie    { color: rgba(255,255,255,0.65); }
+.stat-arrow  { font-size: 0.6rem; color: var(--accent2); }
+
+/* Fila destacada de Rendimiento % */
+.stat-row-highlight {
+  background: rgba(108,92,231,0.06);
+  border-radius: 8px;
+  margin: 2px 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-bottom: 1px solid rgba(108,92,231,0.15) !important;
+}
+
+/* Label con icono de info */
+.stat-label-info { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.info-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px;
+  font-size: 0.7rem; color: var(--accent2);
+  cursor: pointer; position: relative; flex-shrink: 0;
+  opacity: 0.75; transition: opacity 0.2s;
+}
+.info-btn:hover { opacity: 1; }
+
+/* Tooltip */
+.info-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%; transform: translateX(-50%);
+  background: #1e1e2e;
+  border: 1px solid rgba(108,92,231,0.35);
+  color: rgba(255,255,255,0.85);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.5;
+  padding: 10px 14px;
+  border-radius: 10px;
+  width: 260px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  white-space: normal;
+  z-index: 300;
+}
+.info-btn::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(108,92,231,0.35);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 301;
+}
+.info-btn:hover::after,
+.info-btn:hover::before { opacity: 1; }
+
+/* ── H2H tabla ── */
+.h2h-table-wrap { display: flex; flex-direction: column; gap: 2px; }
+.h2h-head {
+  display: grid; grid-template-columns: 100px 1fr 110px 100px;
+  padding: 8px 16px;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 0.62rem; font-weight: 700;
+  letter-spacing: 0.18em; color: rgba(0,229,255,0.9); text-transform: uppercase;
+}
+.hh-nick-a { text-align: right; }
+.hh-nick-b { text-align: left; }
+.h2h-row {
+  display: grid; grid-template-columns: 100px 1fr 110px 100px;
+  align-items: center; padding: 12px 16px;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+.h2h-row:hover { background: rgba(255,255,255,0.04); }
+.h2h-win-a { border-left-color: #a78bf5; }
+.h2h-win-b { border-left-color: #00cec9; }
+.h2h-tie   { border-left-color: rgba(255,255,255,0.15); }
+.h2h-pos { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: var(--text2); text-align: right; }
+.h2h-pos.pos-winner { color: var(--success); }
+.h2h-tname { font-family: 'Barlow Condensed', sans-serif; font-size: 0.9rem; font-weight: 700; color: #fff; text-transform: uppercase; padding: 0 16px; display: flex; flex-direction: column; }
+.h2h-club { font-size: 0.7rem; color: var(--text2); font-weight: 400; text-transform: none; }
+.h2h-date { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text2); text-align: center; }
+
+/* ── Tier badges ── */
+.tier-legend  { background: linear-gradient(135deg,#f5af19,#f12711); color:#000; }
+.tier-master  { background: linear-gradient(135deg,#6c5ce7,#a855f7); color:#fff; }
+.tier-diamond { background: linear-gradient(135deg,#448aff,#00cec9); color:#fff; }
+.tier-gold    { background: linear-gradient(135deg,#ffd740,#f5af19); color:#000; }
+.tier-silver  { background: linear-gradient(135deg,#bdbdbd,#e0e0e0); color:#000; }
+.tier-bronze  { background: linear-gradient(135deg,#a1887f,#d7ccc8); color:#000; }
+.tier-iron    { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); }
+
+/* ── Waiting state ── */
+.waiting-wrap { text-align: center; padding: 80px 0; }
+.waiting-icon { font-size: 3rem; margin-bottom: 16px; }
+.waiting-text { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text2); text-transform: uppercase; }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .selector-wrap { grid-template-columns: 1fr; gap: 12px; }
+  .selector-card:first-child, .selector-card:last-child { border-radius: 16px; border: 1px solid rgba(108,92,231,0.15); }
+  .vs-badge { width: 60px; height: 60px; justify-self: center; }
+  .players-header { grid-template-columns: 1fr; }
+  .ph-card-b { flex-direction: row; }
+  .h2h-badge { order: -1; }
+  .stat-row { grid-template-columns: 1fr 130px 1fr; }
+  .h2h-head, .h2h-row { grid-template-columns: 70px 1fr 90px 70px; }
+}
+@media (max-width: 640px) {
+  .stat-row { grid-template-columns: 1fr 110px 1fr; }
+  .stat-label { font-size: 0.65rem; }
+  .h2h-head, .h2h-row { grid-template-columns: 55px 1fr 80px 55px; }
+  .section-block { padding: 20px 16px; }
+}
+</style>
+
+<style is:global>
+/* ── Dropdown global (creado dinámicamente por JS) ── */
+.sel-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1e1e2e; border: 1px solid rgba(108,92,231,0.25); border-radius: 10px; z-index: 200; display: none; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+.sd-item { display: grid !important; grid-template-columns: 34px 1fr 24px auto; align-items: center; gap: 10px; padding: 10px 14px; text-decoration: none; transition: background 0.15s; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sd-item:last-child { border-bottom: none; }
+.sd-item:hover { background: rgba(108,92,231,0.15) !important; }
+.sd-avatar { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, #6c5ce7, #a855f7); display: flex !important; align-items: center; justify-content: center; font-family: 'Barlow Condensed', sans-serif; font-size: 0.7rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.sd-nick { font-family: 'Barlow Condensed', sans-serif; font-size: 0.9rem; font-weight: 700; color: #fff !important; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-flag { font-size: 1rem; text-align: center; }
+.sd-elo  { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #00cec9 !important; white-space: nowrap; }
+.sd-empty { padding: 14px 16px; font-size: 0.8rem; color: rgba(255,255,255,0.35); }
+</style>

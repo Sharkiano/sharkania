@@ -1,0 +1,550 @@
+---
+// src/pages/club-admin/mi-club.astro
+import ClubAdminLayout from '@layouts/ClubAdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase     = createServerClient();
+const adminProfile = Astro.locals.adminProfile;
+
+if (!adminProfile?.club_id) return Astro.redirect('/club-admin/login');
+
+const clubId = adminProfile.club_id;
+
+// ── Datos del club ────────────────────────
+const { data: club } = await supabase
+  .from('clubs')
+  .select(`
+    *,
+    countries ( id, name, flag_emoji ),
+    rooms     ( id, name )
+  `)
+  .eq('id', clubId)
+  .single();
+
+if (!club) return Astro.redirect('/club-admin/login');
+
+// ── Países y salas para los selects ───────
+const [{ data: countries }, { data: rooms }] = await Promise.all([
+  supabase.from('countries').select('id, name, flag_emoji').order('name'),
+  supabase.from('rooms').select('id, name').order('name'),
+]);
+
+const country = club.countries as { id: number; name: string; flag_emoji: string } | null;
+const room    = club.rooms     as { id: number; name: string } | null;
+const contact = club.contact_info as { telegram?: string; whatsapp?: string; instagram?: string } | null;
+
+// ── Manejar POST (edición) ─────────────────
+let successMsg = '';
+let errorMsg   = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+
+  const name        = (form.get('name')        as string ?? '').trim();
+  const description = (form.get('description') as string ?? '').trim();
+  const countryId   = form.get('country_id')   ? Number(form.get('country_id'))  : null;
+  const roomId      = form.get('room_id')       ? Number(form.get('room_id'))     : null;
+  const telegram    = (form.get('telegram')    as string ?? '').trim();
+  const whatsapp    = (form.get('whatsapp')    as string ?? '').trim();
+  const instagram   = (form.get('instagram')   as string ?? '').trim();
+
+  if (!name) {
+    errorMsg = 'El nombre del club es obligatorio.';
+  } else {
+    const { error } = await supabase
+      .from('clubs')
+      .update({
+        name,
+        description:  description || null,
+        country_id:   countryId,
+        room_id:      roomId,
+        contact_info: {
+          telegram:  telegram  || undefined,
+          whatsapp:  whatsapp  || undefined,
+          instagram: instagram || undefined,
+        },
+      })
+      .eq('id', clubId);
+
+    if (error) {
+      errorMsg = `Error al guardar: ${error.message}`;
+    } else {
+      successMsg = 'Club actualizado correctamente.';
+      // Recargar datos frescos
+      return Astro.redirect('/club-admin/mi-club?updated=1');
+    }
+  }
+}
+
+const updated = Astro.url.searchParams.get('updated') === '1';
+---
+
+<ClubAdminLayout title="Mi Club" clubName={club.name}>
+
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">🏠 Mi Club</h2>
+      <p class="page-sub">Información y configuración de tu club</p>
+    </div>
+    <a href={`/club/${club.slug}`} target="_blank" class="btn btn-secondary">
+      🌐 Ver página pública
+    </a>
+  </div>
+
+  <!-- ── Notificaciones ─────────────────────── -->
+  {updated && (
+    <div class="alert alert-success">✅ Club actualizado correctamente.</div>
+  )}
+  {errorMsg && (
+    <div class="alert alert-error">❌ {errorMsg}</div>
+  )}
+
+  <!-- ── Grid ──────────────────────────────── -->
+  <div class="mi-club-grid">
+
+    <!-- Formulario de edición -->
+    <div class="glass-card form-card">
+      <div class="card-header">
+        <h3 class="card-title">✏️ Editar Información</h3>
+      </div>
+      <div class="card-body">
+        <form method="POST" class="club-form">
+
+          <div class="form-group">
+            <label class="form-label">Nombre del club *</label>
+            <input
+              type="text"
+              name="name"
+              value={club.name}
+              required
+              class="form-input"
+              placeholder="Ej: Poker Club Argentina"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descripción</label>
+            <textarea
+              name="description"
+              rows={3}
+              class="form-input form-textarea"
+              placeholder="Descripción breve del club..."
+            >{club.description ?? ''}</textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">País</label>
+              <select name="country_id" class="form-input form-select">
+                <option value="">— Sin país —</option>
+                {(countries ?? []).map(c => (
+                  <option value={c.id} selected={c.id === country?.id}>
+                    {c.flag_emoji} {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Sala principal</label>
+              <select name="room_id" class="form-input form-select">
+                <option value="">— Sin sala —</option>
+                {(rooms ?? []).map(r => (
+                  <option value={r.id} selected={r.id === room?.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <!-- Contacto -->
+          <div class="form-section-title">Contacto (opcional)</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Telegram</label>
+              <div class="input-with-prefix">
+                <span class="input-prefix">@</span>
+                <input
+                  type="text"
+                  name="telegram"
+                  value={contact?.telegram ?? ''}
+                  class="form-input input-prefixed"
+                  placeholder="usuario"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">WhatsApp</label>
+              <div class="input-with-prefix">
+                <span class="input-prefix">+</span>
+                <input
+                  type="text"
+                  name="whatsapp"
+                  value={contact?.whatsapp ?? ''}
+                  class="form-input input-prefixed"
+                  placeholder="5491123456789"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Instagram</label>
+              <div class="input-with-prefix">
+                <span class="input-prefix">@</span>
+                <input
+                  type="text"
+                  name="instagram"
+                  value={contact?.instagram ?? ''}
+                  class="form-input input-prefixed"
+                  placeholder="usuario"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">💾 Guardar cambios</button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+    <!-- Info actual del club -->
+    <div class="side-col">
+
+      <!-- Vista previa -->
+      <div class="glass-card preview-card">
+        <div class="card-header">
+          <h3 class="card-title">👁️ Vista actual</h3>
+        </div>
+        <div class="preview-body">
+          <div class="preview-avatar">
+            {club.logo_url
+              ? <img src={club.logo_url} alt={club.name} class="preview-logo"/>
+              : <span class="preview-letter">{club.name.charAt(0).toUpperCase()}</span>
+            }
+          </div>
+          <div class="preview-name">{club.name}</div>
+          <div class="preview-meta">
+            {country && <span>{country.flag_emoji} {country.name}</span>}
+            {room    && <span>🎰 {room.name}</span>}
+          </div>
+          {club.description && (
+            <p class="preview-desc">{club.description}</p>
+          )}
+          <div class="preview-contact">
+            {contact?.telegram  && <span class="contact-item">📱 @{contact.telegram}</span>}
+            {contact?.whatsapp  && <span class="contact-item">💬 +{contact.whatsapp}</span>}
+            {contact?.instagram && <span class="contact-item">📸 @{contact.instagram}</span>}
+          </div>
+          <div class="preview-slug">
+            <span class="slug-label">URL pública:</span>
+            <code class="slug-val">/club/{club.slug}</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info del slug -->
+      <div class="glass-card info-card">
+        <div class="card-body" style="padding:1rem 1.25rem;">
+          <p class="info-text">
+            ℹ️ El <strong>slug</strong> y el <strong>logo</strong> solo pueden
+            ser modificados por el Super Admin. Contacta al administrador de
+            Sharkania si necesitas cambiarlos.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</ClubAdminLayout>
+
+<style is:global>
+/* ── Page header ─────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.page-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  margin: 0 0 0.25rem;
+}
+
+.page-sub {
+  font-size: 0.875rem;
+  color: #8888a4;
+  margin: 0;
+}
+
+/* ── Alerts ──────────────────────────────── */
+.alert {
+  padding: 0.875rem 1.25rem;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
+  border: 1px solid;
+}
+
+.alert-success {
+  background: rgba(0,230,118,0.08);
+  border-color: rgba(0,230,118,0.25);
+  color: #00e676;
+}
+
+.alert-error {
+  background: rgba(255,82,82,0.08);
+  border-color: rgba(255,82,82,0.25);
+  color: #ff5252;
+}
+
+/* ── Grid layout ─────────────────────────── */
+.mi-club-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .mi-club-grid { grid-template-columns: 1fr; }
+  .side-col { display: contents; }
+}
+
+/* ── Form card ───────────────────────────── */
+.form-card { overflow: hidden; }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(108,92,231,0.1);
+}
+
+.card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e4e4ef;
+  margin: 0;
+}
+
+.card-body { padding: 1.25rem; }
+
+/* ── Form styles ─────────────────────────── */
+.club-form { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.form-group { display: flex; flex-direction: column; gap: 0.4rem; flex: 1; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .form-row { grid-template-columns: 1fr; }
+}
+
+.form-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #8888a4;
+  letter-spacing: 0.04em;
+}
+
+.form-input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(108,92,231,0.2);
+  border-radius: 8px;
+  padding: 0.6rem 0.875rem;
+  color: #e4e4ef;
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: rgba(108,92,231,0.6);
+  box-shadow: 0 0 0 3px rgba(108,92,231,0.12);
+}
+
+.form-input::placeholder { color: #55556a; }
+
+.form-textarea { resize: vertical; min-height: 80px; }
+
+.form-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888a4' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  padding-right: 2.5rem;
+}
+
+.form-select option { background: #12121a; color: #e4e4ef; }
+
+.form-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #6c5ce7;
+  text-transform: uppercase;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(108,92,231,0.12);
+}
+
+/* Input con prefijo */
+.input-with-prefix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-prefix {
+  position: absolute;
+  left: 0.875rem;
+  font-size: 0.875rem;
+  color: #8888a4;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.input-prefixed { padding-left: 1.75rem !important; }
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* ── Preview card ────────────────────────── */
+.preview-card { overflow: hidden; }
+
+.preview-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.6rem;
+}
+
+.preview-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(41,121,255,0.3), rgba(0,229,255,0.2));
+  border: 1px solid rgba(0,229,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.25rem;
+}
+
+.preview-letter {
+  font-size: 1.75rem;
+  font-weight: 900;
+  color: #fff;
+}
+
+.preview-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+.preview-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e4e4ef;
+}
+
+.preview-meta {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #8888a4;
+}
+
+.preview-desc {
+  font-size: 0.8rem;
+  color: #55556a;
+  line-height: 1.5;
+  max-width: 240px;
+}
+
+.preview-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.contact-item {
+  font-size: 0.78rem;
+  color: #8888a4;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.preview-slug {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  width: 100%;
+  justify-content: center;
+}
+
+.slug-label {
+  font-size: 0.72rem;
+  color: #55556a;
+}
+
+.slug-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #6c5ce7;
+  background: rgba(108,92,231,0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* ── Info card ───────────────────────────── */
+.info-card { margin-top: 1rem; }
+
+.info-text {
+  font-size: 0.8rem;
+  color: #55556a;
+  line-height: 1.6;
+}
+
+.info-text strong { color: #8888a4; }
+
+/* ── Side col order on mobile ────────────── */
+@media (max-width: 1024px) {
+  .preview-card { order: -1; }
+}
+</style>

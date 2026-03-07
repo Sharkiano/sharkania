@@ -1,0 +1,912 @@
+---
+// src/pages/club/[slug].astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { slug } = Astro.params;
+const supabase  = createServerClient();
+
+if (!slug) return Astro.redirect('/');
+
+// ── Club ──────────────────────────────────
+const { data: club } = await supabase
+  .from('clubs')
+  .select(`
+    *,
+    countries ( name, flag_emoji, code ),
+    rooms     ( name, slug )
+  `)
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .single();
+
+if (!club) return Astro.redirect('/');
+
+// ── Ligas del club ────────────────────────
+const { data: leagues } = await supabase
+  .from('leagues')
+  .select('id, name, slug, season_start, season_end, is_active')
+  .eq('club_id', club.id)
+  .order('created_at', { ascending: false });
+
+// ── Torneos del club (verificados) ────────
+const { data: tournaments } = await supabase
+  .from('tournaments')
+  .select(`
+    id, name, date, total_players, buy_in, currency,
+    leagues ( name, slug ),
+    rooms   ( name )
+  `)
+  .eq('club_id', club.id)
+  .eq('is_verified', true)
+  .order('date', { ascending: false })
+  .limit(20);
+
+// ── Top jugadores del club ─────────────────
+// Jugadores que más torneos han jugado en este club
+const { data: topPlayersRaw } = await supabase
+  .from('tournament_results')
+  .select(`
+    players ( id, nickname, slug, elo_rating, total_podiums, total_tournaments,
+              countries ( flag_emoji, name ) ),
+    tournaments!inner ( club_id )
+  `)
+  .eq('tournaments.club_id', club.id);
+
+// Agrupar por jugador y contar torneos en el club
+type PlayerEntry = {
+  id: number;
+  nickname: string;
+  slug: string;
+  elo_rating: number;
+  total_podiums: number;
+  total_tournaments: number;
+  flag: string;
+  country: string;
+  clubTournaments: number;
+};
+
+const playerMap = new Map<number, PlayerEntry>();
+
+(topPlayersRaw ?? []).forEach(row => {
+  const p = row.players as {
+    id: number; nickname: string; slug: string; elo_rating: number;
+    total_podiums: number; total_tournaments: number;
+    countries: { flag_emoji: string; name: string } | null;
+  } | null;
+  if (!p) return;
+
+  if (playerMap.has(p.id)) {
+    playerMap.get(p.id)!.clubTournaments += 1;
+  } else {
+    playerMap.set(p.id, {
+      id:               p.id,
+      nickname:         p.nickname,
+      slug:             p.slug,
+      elo_rating:       p.elo_rating ?? 1200,
+      total_podiums:    p.total_podiums ?? 0,
+      total_tournaments: p.total_tournaments ?? 0,
+      flag:             p.countries?.flag_emoji ?? '',
+      country:          p.countries?.name ?? '',
+      clubTournaments:  1,
+    });
+  }
+});
+
+const topPlayers = Array.from(playerMap.values())
+  .sort((a, b) => b.elo_rating - a.elo_rating)
+  .slice(0, 10);
+
+// ── Stats generales ───────────────────────
+const totalTournaments = tournaments?.length ?? 0;
+const totalPlayers     = playerMap.size;
+const totalLeagues     = leagues?.length ?? 0;
+
+// ── Tipos y helpers ───────────────────────
+const country = club.countries as { name: string; flag_emoji: string; code: string } | null;
+const room    = club.rooms     as { name: string; slug: string } | null;
+const contact = club.contact_info as { telegram?: string; whatsapp?: string; instagram?: string } | null;
+
+function getEloBadge(elo: number): { cls: string; label: string } {
+  if (elo >= 1800) return { cls: 'tier-legend',  label: 'LEGEND'  };
+  if (elo >= 1600) return { cls: 'tier-master',  label: 'MASTER'  };
+  if (elo >= 1400) return { cls: 'tier-diamond', label: 'DIAMOND' };
+  if (elo >= 1300) return { cls: 'tier-gold',    label: 'GOLD'    };
+  if (elo >= 1200) return { cls: 'tier-silver',  label: 'SILVER'  };
+  if (elo >= 1100) return { cls: 'tier-bronze',  label: 'BRONZE'  };
+  return              { cls: 'tier-entry',   label: 'ENTRY'   };
+}
+
+// Pre-procesar torneos
+const processedTournaments = (tournaments ?? []).map(t => {
+  const lg = t.leagues as { name: string; slug: string } | null;
+  const rm = t.rooms   as { name: string } | null;
+  return {
+    id:           t.id,
+    name:         t.name,
+    date:         t.date,
+    totalPlayers: t.total_players,
+    buyIn:        t.buy_in,
+    currency:     t.currency ?? '',
+    leagueName:   lg?.name ?? '',
+    leagueSlug:   lg?.slug ?? '',
+    roomName:     rm?.name ?? '',
+  };
+});
+
+// Pre-procesar top jugadores
+const processedPlayers = topPlayers.map((p, i) => ({
+  ...p,
+  rank:  i + 1,
+  badge: getEloBadge(p.elo_rating),
+}));
+---
+
+<PublicLayout
+  title={club.name}
+  description={club.description ?? `${club.name} en Sharkania. Club de póker online con ${totalTournaments} torneos registrados.`}
+  ogTitle={club.name}
+>
+
+<!-- ── CLUB HERO ───────────────────────────── -->
+<section class="club-hero">
+  <div class="section-wrap">
+
+    <!-- Breadcrumb -->
+    <div class="breadcrumb">
+      <a href="/" class="bc-link">RANKING</a>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">{club.name}</span>
+    </div>
+
+    <!-- Header card -->
+    <div class="club-header crystal crystal-heavy">
+      <div class="club-header-inner">
+
+        <!-- Logo / Avatar -->
+        <div class="club-avatar">
+          {club.logo_url
+            ? <img src={club.logo_url} alt={club.name} class="club-logo-img"/>
+            : <span class="club-avatar-letter">{club.name.charAt(0).toUpperCase()}</span>
+          }
+          <div class="club-avatar-ring"></div>
+        </div>
+
+        <!-- Info -->
+        <div class="club-identity">
+          <div class="club-meta-top">
+            {country && (
+              <span class="club-country-badge">
+                {country.flag_emoji} {country.name}
+              </span>
+            )}
+            {room && (
+              <span class="club-room-badge">{room.name}</span>
+            )}
+            <span class={club.is_active ? 'club-status active' : 'club-status inactive'}>
+              {club.is_active ? 'ACTIVO' : 'INACTIVO'}
+            </span>
+          </div>
+
+          <h1 class="club-name">{club.name}</h1>
+
+          {club.description && (
+            <p class="club-desc">{club.description}</p>
+          )}
+
+          <!-- Contacto -->
+          {contact && (contact.telegram || contact.whatsapp || contact.instagram) && (
+            <div class="club-contact">
+              {contact.telegram && (
+                <a href={`https://t.me/${contact.telegram}`} target="_blank" rel="noopener" class="contact-btn contact-tg">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.43 13.93l-2.956-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.714.629z"/>
+                  </svg>
+                  TELEGRAM
+                </a>
+              )}
+              {contact.whatsapp && (
+                <a href={`https://wa.me/${contact.whatsapp}`} target="_blank" rel="noopener" class="contact-btn contact-wa">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                  </svg>
+                  WHATSAPP
+                </a>
+              )}
+              {contact.instagram && (
+                <a href={`https://instagram.com/${contact.instagram}`} target="_blank" rel="noopener" class="contact-btn contact-ig">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                  INSTAGRAM
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      <!-- Stats row -->
+      <div class="club-stats-row">
+        <div class="club-stat">
+          <span class="cs-num">{totalTournaments}</span>
+          <span class="cs-label">TORNEOS</span>
+        </div>
+        <div class="club-stat-sep"></div>
+        <div class="club-stat">
+          <span class="cs-num">{totalPlayers}</span>
+          <span class="cs-label">JUGADORES</span>
+        </div>
+        <div class="club-stat-sep"></div>
+        <div class="club-stat">
+          <span class="cs-num">{totalLeagues}</span>
+          <span class="cs-label">LIGAS</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── LIGAS ───────────────────────────────── -->
+{leagues && leagues.length > 0 && (
+  <section class="leagues-section">
+    <div class="section-wrap">
+      <div class="section-eyebrow">COMPETENCIAS</div>
+      <h2 class="section-title" style="margin-bottom:1.25rem;">LIGAS ACTIVAS</h2>
+      <div class="leagues-grid">
+        {leagues.map(lg => (
+          <a href={`/rankings/${lg.slug}`} class="league-card crystal">
+            <div class="lc-top">
+              <span class={lg.is_active ? 'lc-status active' : 'lc-status inactive'}>
+                {lg.is_active ? 'ACTIVA' : 'FINALIZADA'}
+              </span>
+            </div>
+            <div class="lc-name">{lg.name}</div>
+            {(lg.season_start || lg.season_end) && (
+              <div class="lc-dates">
+                {lg.season_start ?? '—'} → {lg.season_end ?? 'presente'}
+              </div>
+            )}
+            <div class="lc-arrow">VER RANKING →</div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- ── TOP JUGADORES ──────────────────────── -->
+{processedPlayers.length > 0 && (
+  <section class="top-section">
+    <div class="section-wrap">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow">CLASIFICACIÓN</div>
+          <h2 class="section-title">TOP JUGADORES</h2>
+        </div>
+      </div>
+
+      <div class="table-crystal">
+        <div class="tp-head">
+          <span>POS</span>
+          <span>JUGADOR</span>
+          <span class="col-tier">TIER</span>
+          <span>ELO</span>
+          <span class="col-stat">EN CLUB</span>
+          <span class="col-stat">PODIOS</span>
+        </div>
+        <div class="t-body">
+          {processedPlayers.map(p => (
+            <a href={`/jugador/${p.slug}`} class={
+              p.rank === 1 ? 't-row top-1' :
+              p.rank === 2 ? 't-row top-2' :
+              p.rank === 3 ? 't-row top-3' : 't-row'
+            }>
+              <div>
+                <span class={
+                  p.rank === 1 ? 'r-num gold'   :
+                  p.rank === 2 ? 'r-num silver' :
+                  p.rank === 3 ? 'r-num bronze' : 'r-num'
+                }>{String(p.rank).padStart(2,'0')}</span>
+              </div>
+              <div class="p-cell">
+                {p.flag && <span class="p-flag">{p.flag}</span>}
+                <div class="p-info">
+                  <span class="p-nick">{p.nickname}</span>
+                  {p.country && <span class="p-country">{p.country}</span>}
+                </div>
+              </div>
+              <div class="col-tier">
+                <span class={`tier ${p.badge.cls}`}>{p.badge.label}</span>
+              </div>
+              <div><span class="elo-val">{p.elo_rating}</span></div>
+              <div><span class="s-val col-stat">{p.clubTournaments}</span></div>
+              <div><span class="s-val col-stat">{p.total_podiums}</span></div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- ── TORNEOS ────────────────────────────── -->
+<section class="torneos-section">
+  <div class="section-wrap">
+    <div class="section-head">
+      <div>
+        <div class="section-eyebrow">HISTORIAL</div>
+        <h2 class="section-title">ÚLTIMOS TORNEOS</h2>
+      </div>
+    </div>
+
+    {processedTournaments.length > 0 ? (
+      <div class="table-crystal">
+        <div class="to-head">
+          <span>FECHA</span>
+          <span>TORNEO</span>
+          <span class="col-lg">LIGA</span>
+          <span class="col-rm">SALA</span>
+          <span>JUGADORES</span>
+          <span class="col-bi">BUY-IN</span>
+        </div>
+        <div class="t-body">
+          {processedTournaments.map(t => (
+            <a href={`/torneo/${t.id}`} class="to-row">
+              <div class="to-date">{t.date}</div>
+              <div class="to-name">{t.name}</div>
+              <div class="col-lg">
+                {t.leagueName
+                  ? <span class="league-pill">{t.leagueName}</span>
+                  : <span class="no-val">—</span>
+                }
+              </div>
+              <div class="col-rm">
+                <span class="room-val">{t.roomName || '—'}</span>
+              </div>
+              <div><span class="num-val">{t.totalPlayers}</span></div>
+              <div class="col-bi">
+                {t.buyIn
+                  ? <span class="buyin-val">{t.buyIn} {t.currency}</span>
+                  : <span class="no-val">—</span>
+                }
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    ) : (
+      <div class="empty-state crystal">
+        <p class="empty-text">ESTE CLUB AÚN NO TIENE TORNEOS VERIFICADOS</p>
+      </div>
+    )}
+  </div>
+</section>
+
+</PublicLayout>
+
+<style>
+/* ── Hero ─────────────────────────────────── */
+.club-hero { padding: 2.5rem 0 0; }
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.bc-link {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.bc-link:hover { color: var(--accent2); }
+.bc-sep { font-size: 0.65rem; color: rgba(255,255,255,0.45); }
+.bc-current {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+
+/* Header card */
+.club-header {
+  padding: 2rem 2.5rem;
+  margin-bottom: 3rem;
+}
+
+.club-header-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+/* Avatar */
+.club-avatar {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.club-avatar-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 90px;
+  height: 90px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(41,121,255,0.3), rgba(0,229,255,0.2));
+  border: 2px solid rgba(0,229,255,0.25);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0,229,255,0.4);
+  box-shadow: 0 0 30px rgba(41,121,255,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+.club-logo-img {
+  width: 90px;
+  height: 90px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.12);
+}
+
+.club-avatar-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 20px;
+  border: 1px solid rgba(0,229,255,0.15);
+}
+
+/* Identity */
+.club-identity { flex: 1; min-width: 0; }
+
+.club-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.club-country-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.club-room-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 3px 10px;
+  border-radius: 50px;
+}
+
+.club-status {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 3px 10px;
+  border-radius: 50px;
+  border: 1px solid;
+}
+
+.club-status.active   { color: var(--success); background: rgba(0,230,118,0.07); border-color: rgba(0,230,118,0.2); }
+.club-status.inactive { color: var(--text-faint); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.1); }
+
+.club-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 20px rgba(41,121,255,0.3));
+  margin-bottom: 0.6rem;
+}
+
+.club-desc {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  max-width: 520px;
+  margin-bottom: 1rem;
+}
+
+/* Contacto */
+.club-contact {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid;
+  text-decoration: none;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+
+.contact-tg { color: #7dd3fc; background: rgba(41,121,255,0.08); border-color: rgba(41,121,255,0.2); }
+.contact-tg:hover { background: rgba(41,121,255,0.15); border-color: rgba(41,121,255,0.4); }
+
+.contact-wa { color: #86efac; background: rgba(0,230,118,0.07); border-color: rgba(0,230,118,0.18); }
+.contact-wa:hover { background: rgba(0,230,118,0.13); border-color: rgba(0,230,118,0.35); }
+
+.contact-ig { color: #f9a8d4; background: rgba(249,168,212,0.07); border-color: rgba(249,168,212,0.18); }
+.contact-ig:hover { background: rgba(249,168,212,0.13); border-color: rgba(249,168,212,0.35); }
+
+/* Stats row */
+.club-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 1.5rem;
+}
+
+.club-stat {
+  flex: 1;
+  text-align: center;
+}
+
+.club-stat-sep {
+  width: 1px;
+  height: 40px;
+  background: rgba(255,255,255,0.07);
+}
+
+.cs-num {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 10px rgba(41,121,255,0.3));
+  line-height: 1;
+  margin-bottom: 0.3rem;
+}
+
+.cs-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--accent2);
+  opacity: 1;
+}
+
+/* ── Ligas ────────────────────────────────── */
+.leagues-section { padding: 0 0 3rem; }
+
+.leagues-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.league-card {
+  padding: 1.5rem;
+  text-decoration: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.league-card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 14px 36px rgba(0,0,0,0.4),
+    0 0 24px rgba(41,121,255,0.1),
+    inset 0 1px 0 rgba(255,255,255,0.28);
+}
+
+.lc-top { margin-bottom: 0.25rem; }
+
+.lc-status {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 3px 9px;
+  border-radius: 50px;
+  border: 1px solid;
+}
+
+.lc-status.active   { color: var(--success); background: rgba(0,230,118,0.07); border-color: rgba(0,230,118,0.2); }
+.lc-status.inactive { color: var(--text-faint); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+
+.lc-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.lc-dates {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.lc-arrow {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--accent2);
+  margin-top: 0.5rem;
+  transition: letter-spacing 0.2s;
+}
+
+.league-card:hover .lc-arrow { letter-spacing: 0.22em; }
+
+/* ── Top jugadores ────────────────────────── */
+.top-section { padding: 0 0 3rem; }
+
+/* ── Torneos ──────────────────────────────── */
+.torneos-section { padding: 0 0 6rem; }
+
+/* Tables — crystal system */
+.table-crystal {
+  position: relative;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.5),
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.15);
+}
+
+.table-crystal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 5%; right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,0.55) 25%,
+    rgba(255,255,255,0.85) 50%,
+    rgba(255,255,255,0.55) 75%, transparent
+  );
+  z-index: 2;
+  pointer-events: none;
+}
+
+.table-crystal::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -1px;
+  width: 3px; height: 100%;
+  background: linear-gradient(180deg,
+    rgba(41,121,255,0.7), rgba(0,229,255,0.4),
+    rgba(41,121,255,0.2), transparent
+  );
+  border-radius: 14px 0 0 14px;
+}
+
+/* Top players table */
+.tp-head {
+  display: grid;
+  grid-template-columns: 64px 1fr 120px 100px 90px 80px;
+  padding: 0.875rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.tp-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.85);
+}
+
+.t-body { display: flex; flex-direction: column; }
+
+.t-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 120px 100px 90px 80px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 60px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+
+.t-row:hover { background: rgba(255,255,255,0.05); }
+
+.t-row::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), rgba(255,255,255,0.06), transparent);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.t-row:hover::after { left: 140%; }
+
+.t-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.25s;
+  z-index: 1;
+}
+
+.t-row:hover::before { height: 65%; }
+
+.t-row.top-1 { background: linear-gradient(90deg, rgba(232,197,90,0.09) 0%, rgba(232,197,90,0.03) 40%, transparent 70%); }
+.t-row.top-1::before { height: 65%; background: linear-gradient(180deg, #e8c55a, #f7e08a); box-shadow: 0 0 12px rgba(232,197,90,0.5); }
+.t-row.top-2 { background: linear-gradient(90deg, rgba(180,195,210,0.07) 0%, transparent 60%); }
+.t-row.top-2::before { height: 65%; background: linear-gradient(180deg, #b0c4d8, #d8e8f5); }
+.t-row.top-3 { background: linear-gradient(90deg, rgba(200,140,90,0.07) 0%, transparent 60%); }
+.t-row.top-3::before { height: 65%; background: linear-gradient(180deg, #c88050, #e0aa7a); }
+
+.r-num        { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 800; color: rgba(255,255,255,0.55); }
+.r-num.gold   { font-size: 1.2rem; background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 8px rgba(232,197,90,0.5)); }
+.r-num.silver { font-size: 1.1rem; background: linear-gradient(180deg, #e0eefc, #90afc8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.r-num.bronze { background: linear-gradient(180deg, #e0aa7a, #a06030); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+.p-cell   { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+.p-flag   { font-size: 1.2rem; flex-shrink: 0; }
+.p-info   { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.p-nick   { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.t-row:hover .p-nick { color: var(--accent2); }
+.p-country { font-family: 'Barlow Condensed', sans-serif; font-size: 0.64rem; color: rgba(255,255,255,0.6); }
+
+.elo-val { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 700; color: #fff; }
+.t-row.top-1 .elo-val { background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 6px rgba(232,197,90,0.4)); }
+.s-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--text-dim); }
+
+/* Torneos table */
+.to-head {
+  display: grid;
+  grid-template-columns: 100px 1fr 140px 110px 90px 100px;
+  padding: 0.875rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.to-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.85);
+}
+
+.to-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 140px 110px 90px 100px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 58px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+
+.to-row:hover { background: rgba(255,255,255,0.04); }
+
+.to-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s;
+}
+
+.to-row:hover::before { height: 60%; }
+
+.to-date  { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-faint); }
+.to-name  { font-family: 'Barlow Condensed', sans-serif; font-size: 0.92rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.to-row:hover .to-name { color: var(--accent2); }
+.num-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-dim); }
+.room-val { font-family: 'Barlow Condensed', sans-serif; font-size: 0.8rem; color: var(--text-faint); }
+.buyin-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--success); }
+.no-val   { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: rgba(255,255,255,0.5); }
+
+.league-pill {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  background: rgba(41,121,255,0.1);
+  border: 1px solid rgba(41,121,255,0.25);
+  border-radius: 20px;
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 3.5rem;
+  text-align: center;
+  border-radius: 14px;
+}
+
+.empty-text {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 900px) {
+  .tp-head, .t-row { grid-template-columns: 56px 1fr 90px 85px; }
+  .col-stat { display: none; }
+  .to-head, .to-row { grid-template-columns: 90px 1fr 80px; }
+  .col-lg, .col-rm, .col-bi { display: none; }
+}
+
+@media (max-width: 640px) {
+  .club-header { padding: 1.5rem; }
+  .club-header-inner { flex-direction: column; gap: 1.25rem; }
+  .tp-head, .t-row { grid-template-columns: 48px 1fr 80px; }
+  .col-tier { display: none; }
+}
+</style>
+</PublicLayout>

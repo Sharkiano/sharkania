@@ -1,0 +1,253 @@
+---
+// src/pages/admin/admins/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: admins } = await supabase
+  .from('admin_profiles')
+  .select('*, clubs ( name )')
+  .order('created_at', { ascending: false });
+
+const activeCount   = admins?.filter(a => a.is_active).length  ?? 0;
+const inactiveCount = admins?.filter(a => !a.is_active).length ?? 0;
+---
+
+<AdminLayout title="Admins de Club">
+
+  <div class="page-header">
+    <div>
+      <p class="page-meta">
+        <span class="meta-badge meta-active">{activeCount} activos</span>
+        <span class="meta-badge meta-inactive">{inactiveCount} inactivos</span>
+      </p>
+    </div>
+    <a href="/admin/admins/nuevo" class="btn btn-primary">+ Nuevo Admin</a>
+  </div>
+
+  <div class="glass-card table-card">
+    {admins && admins.length > 0 && (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Admin</th>
+            <th>Email</th>
+            <th>Rol</th>
+            <th>Club</th>
+            <th>Último login</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {admins.map(admin => {
+            const club = admin.clubs as { name: string } | null;
+            return (
+              <tr id={`row-${admin.id}`}>
+                <td>
+                  <div class="admin-name-cell">
+                    <div class={`admin-avatar ${admin.role === 'super_admin' ? 'admin-avatar--super' : ''}`}>
+                      {admin.name.charAt(0).toUpperCase()}
+                    </div>
+                    <span class="admin-name">{admin.name}</span>
+                  </div>
+                </td>
+                <td class="text-secondary" style="font-size:0.85rem;">{admin.email}</td>
+                <td>
+                  <span class={`role-badge ${admin.role === 'super_admin' ? 'role-super' : 'role-club'}`}>
+                    {admin.role === 'super_admin' ? '⭐ Super Admin' : '🏠 Club Admin'}
+                  </span>
+                </td>
+                <td class="text-secondary">
+                  {club ? club.name : <span class="text-muted">—</span>}
+                </td>
+                <td class="text-mono text-secondary" style="font-size:0.78rem;">
+                  {admin.last_login
+                    ? new Date(admin.last_login).toLocaleDateString('es-ES', { day:'2-digit', month:'2-digit', year:'numeric' })
+                    : <span class="text-muted">Nunca</span>
+                  }
+                </td>
+                <td>
+                  <span class={`status-badge ${admin.is_active ? 'status-verified' : 'status-inactive'}`}>
+                    {admin.is_active ? '✓ Activo' : '✗ Inactivo'}
+                  </span>
+                </td>
+                <td>
+                  <div class="action-btns">
+                    <button
+                      class={`action-btn ${admin.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
+                      data-id={admin.id}
+                      data-active={String(admin.is_active)}
+                      data-role={admin.role}
+                      onclick="toggleAdmin(this)"
+                      aria-label={admin.is_active ? 'Desactivar' : 'Activar'}
+                    >{admin.is_active ? '⏸' : '▶'}</button>
+                    {admin.role !== 'super_admin' && (
+                      <button
+                        class="action-btn action-btn--danger"
+                        data-id={admin.id}
+                        data-name={admin.name}
+                        onclick="deleteAdmin(this)"
+                        aria-label={`Eliminar ${admin.name}`}
+                      >🗑</button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+    {(!admins || admins.length === 0) && (
+      <div class="empty-state" style="padding:3rem;">
+        <p style="font-size:2rem;margin:0;">👤</p>
+        <p>No hay admins de club creados aún.</p>
+        <a href="/admin/admins/nuevo" class="btn btn-primary" style="margin-top:0.75rem;">
+          Crear primer admin
+        </a>
+      </div>
+    )}
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</AdminLayout>
+
+<style is:global>
+.admin-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.admin-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00cec9, #6c5ce7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.admin-avatar--super {
+  background: linear-gradient(135deg, #f5af19, #f12711);
+}
+
+.admin-name {
+  font-weight: 500;
+  color: #e4e4ef;
+  font-size: 0.9rem;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.role-super {
+  background: rgba(245, 175, 25, 0.1);
+  color: #f5af19;
+  border: 1px solid rgba(245, 175, 25, 0.25);
+}
+
+.role-club {
+  background: rgba(0, 206, 201, 0.1);
+  color: #00cec9;
+  border: 1px solid rgba(0, 206, 201, 0.25);
+}
+</style>
+
+<script>
+async function toggleAdmin(btn: HTMLElement) {
+  const id       = btn.dataset.id!;
+  const isActive = btn.dataset.active === 'true';
+  const role     = btn.dataset.role;
+  const newState = !isActive;
+
+  if (role === 'super_admin' && !newState) {
+    if (!confirm('¿Estás seguro de desactivar un Super Admin?')) return;
+  }
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/admins', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, is_active: newState }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al actualizar.', 'error');
+      return;
+    }
+
+    const row   = document.getElementById(`row-${id}`);
+    const badge = row?.querySelector('.status-badge') as HTMLElement;
+
+    btn.dataset.active = String(newState);
+    btn.textContent    = newState ? '⏸' : '▶';
+    btn.className      = `action-btn ${newState ? 'action-btn--warning' : 'action-btn--success'}`;
+    if (badge) {
+      badge.textContent = newState ? '✓ Activo' : '✗ Inactivo';
+      badge.className   = `status-badge ${newState ? 'status-verified' : 'status-inactive'}`;
+    }
+
+    showToast(`Admin ${newState ? 'activado' : 'desactivado'}.`, 'success');
+  } finally {
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+async function deleteAdmin(btn: HTMLElement) {
+  const id   = btn.dataset.id!;
+  const name = btn.dataset.name ?? 'este admin';
+
+  if (!confirm(`¿Eliminar a "${name}"? Se eliminará su acceso permanentemente.`)) return;
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/admins', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al eliminar.', 'error');
+      (btn as HTMLButtonElement).disabled = false;
+      return;
+    }
+
+    document.getElementById(`row-${id}`)?.remove();
+    showToast(`Admin "${name}" eliminado.`, 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+(window as unknown as Record<string, unknown>).toggleAdmin = toggleAdmin;
+(window as unknown as Record<string, unknown>).deleteAdmin = deleteAdmin;
+</script>

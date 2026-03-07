@@ -1,0 +1,31 @@
+{
+  "name": "sharkania",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "types": "supabase gen types typescript --project-id hlaokipmohnhsjfcgvga.supabase > src/lib/supabase/types.ts",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "lint": "tsc --noEmit",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.6",
+    "@astrojs/cloudflare": "^12.6.5",
+    "@supabase/supabase-js": "^2.98.0",
+    "astro": "^5.17.1",
+    "chart.js": "^4.5.1",
+    "papaparse": "^5.5.3",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/papaparse": "^5.5.2",
+    "supabase": "^2.76.16",
+    "tailwindcss": "^4.2.1"
+  }
+}

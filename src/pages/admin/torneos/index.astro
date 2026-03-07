@@ -1,0 +1,370 @@
+---
+// src/pages/admin/torneos/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase  = createServerClient();
+const filter    = Astro.url.searchParams.get('filter') ?? 'all';
+const page      = Number(Astro.url.searchParams.get('page') ?? 1);
+const limit     = 50;
+const offset    = (page - 1) * limit;
+
+let query = supabase
+  .from('tournaments')
+  .select(`
+    id, name, date, total_players, buy_in, currency,
+    is_verified, created_at,
+    clubs   ( name ),
+    leagues ( name ),
+    rooms   ( name )
+  `, { count: 'exact' })
+  .order('created_at', { ascending: false })
+  .range(offset, offset + limit - 1);
+
+if (filter === 'pending')  query = query.eq('is_verified', false);
+if (filter === 'verified') query = query.eq('is_verified', true);
+
+const { data: tournaments, count } = await query;
+
+const totalPages    = Math.ceil((count ?? 0) / limit);
+const pendingCount  = (await supabase.from('tournaments').select('*', { count: 'exact', head: true }).eq('is_verified', false)).count ?? 0;
+const verifiedCount = (await supabase.from('tournaments').select('*', { count: 'exact', head: true }).eq('is_verified', true)).count  ?? 0;
+---
+
+<AdminLayout title="Torneos">
+
+  <!-- ── Header ───────────────────────────────────────── -->
+  <div class="page-header">
+    <div>
+      <p class="page-meta">
+        <span class="meta-badge meta-active">{verifiedCount} verificados</span>
+        <span class="meta-badge meta-inactive">{pendingCount} pendientes</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Filtros ───────────────────────────────────────── -->
+  <div class="filter-tabs">
+    <a href="/admin/torneos"                  class={`filter-tab ${filter === 'all'      ? 'filter-tab--active' : ''}`}>Todos ({count ?? 0})</a>
+    <a href="/admin/torneos?filter=pending"   class={`filter-tab ${filter === 'pending'  ? 'filter-tab--active' : ''}`}>⏳ Pendientes ({pendingCount})</a>
+    <a href="/admin/torneos?filter=verified"  class={`filter-tab ${filter === 'verified' ? 'filter-tab--active' : ''}`}>✓ Verificados ({verifiedCount})</a>
+  </div>
+
+  <!-- ── Tabla ─────────────────────────────────────────── -->
+  <div class="glass-card table-card">
+    {tournaments && tournaments.length > 0 && (
+      <table class="poker-table" id="tournaments-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Torneo</th>
+            <th>Club</th>
+            <th>Liga</th>
+            <th>Sala</th>
+            <th>Fecha</th>
+            <th>Jugadores</th>
+            <th>Buy-in</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tournaments.map(t => {
+            const club   = t.clubs   as { name: string } | null;
+            const league = t.leagues as { name: string } | null;
+            const room   = t.rooms   as { name: string } | null;
+            return (
+              <tr id={`row-${t.id}`}>
+                <td class="text-mono text-secondary">{t.id}</td>
+                <td>
+                  <div class="tournament-name-cell">
+                    <span class="tournament-name">{t.name}</span>
+                  </div>
+                </td>
+                <td class="text-secondary">{club?.name ?? '—'}</td>
+                <td>{league ? <span class="league-tag">{league.name}</span> : '—'}</td>
+                <td class="text-secondary">{room?.name ?? '—'}</td>
+                <td class="text-mono text-secondary">{t.date}</td>
+                <td class="text-mono">{t.total_players}</td>
+                <td class="text-mono text-secondary">{t.buy_in ? `${t.buy_in} ${t.currency}` : '—'}</td>
+                <td>
+                  {t.is_verified
+                    ? <span class="status-badge status-verified">✓ Verificado</span>
+                    : <span class="status-badge status-pending">⏳ Pendiente</span>
+                  }
+                </td>
+                <td>
+                  <div class="action-btns">
+                    <a href={`/admin/torneos/${t.id}`} class="action-btn action-btn--edit">👁</a>
+                    {!t.is_verified && (
+                      <button
+                        class="action-btn action-btn--success"
+                        data-id={t.id}
+                        data-name={t.name}
+                        onclick="verifyTournament(this)"
+                        title="Verificar y calcular ELO"
+                      >✓</button>
+                    )}
+                    <button
+                      class="action-btn action-btn--danger"
+                      data-id={t.id}
+                      data-name={t.name}
+                      onclick="deleteTournament(this)"
+                    >🗑</button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+    {(!tournaments || tournaments.length === 0) && (
+      <div class="empty-state" style="padding:3rem;">
+        <p style="font-size:2rem;margin:0;">🏆</p>
+        <p>{filter === 'pending' ? 'No hay torneos pendientes.' : 'No hay torneos cargados aún.'}</p>
+      </div>
+    )}
+  </div>
+
+  <!-- ── Paginación ─────────────────────────────────────── -->
+  {totalPages > 1 && (
+    <div class="pagination">
+      {page > 1 && (
+        <a href={`/admin/torneos?page=${page-1}&filter=${filter}`} class="page-btn">← Anterior</a>
+      )}
+      <span class="page-info">Página {page} de {totalPages}</span>
+      {page < totalPages && (
+        <a href={`/admin/torneos?page=${page+1}&filter=${filter}`} class="page-btn">Siguiente →</a>
+      )}
+    </div>
+  )}
+
+  <!-- ── Modal verificación ────────────────────────────── -->
+  <div class="modal-backdrop" id="verify-modal">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3 class="modal-title">✓ Verificar Torneo</h3>
+        <button class="modal-close" onclick="closeVerifyModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="verify-description">
+          Al verificar el torneo <strong id="verify-tournament-name"></strong>:
+        </p>
+        <ul class="verify-list">
+          <li>✅ Se calculará el ELO para todos los jugadores</li>
+          <li>✅ Se actualizará el ranking global</li>
+          <li>✅ El torneo será visible públicamente</li>
+          <li>⚠️ Esta acción no se puede deshacer</li>
+        </ul>
+        <div class="verify-result" id="verify-result" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeVerifyModal()">Cancelar</button>
+        <button class="btn btn-primary" id="btn-verify-confirm">Verificar y calcular ELO</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</AdminLayout>
+
+<style is:global>
+/* ── Page header ─────────────────────────────── */
+.page-header  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem; }
+.page-meta    { display: flex; gap: 0.5rem; margin: 0; flex-wrap: wrap; }
+.meta-badge   { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.meta-active  { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.meta-inactive { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.2); }
+
+/* ── Filter tabs ─────────────────────────────── */
+.filter-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.filter-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  color: #8888a4;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: all 0.2s;
+}
+
+.filter-tab:hover       { color: #e4e4ef; border-color: rgba(108,92,231,0.2); }
+.filter-tab--active     { color: #e4e4ef; background: rgba(108,92,231,0.12); border-color: rgba(108,92,231,0.3); }
+
+/* ── Table ───────────────────────────────────── */
+.table-card         { padding: 0; overflow: hidden; overflow-x: auto; }
+.tournament-name    { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.tournament-name-cell { display: flex; flex-direction: column; gap: 2px; }
+.league-tag         { display: inline-flex; align-items: center; padding: 2px 8px; background: rgba(108,92,231,0.1); border: 1px solid rgba(108,92,231,0.2); border-radius: 20px; font-size: 0.75rem; color: #6c5ce7; font-weight: 500; }
+.status-badge       { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified    { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.status-pending     { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.2); }
+.action-btns        { display: flex; gap: 0.5rem; }
+.action-btn         { width: 32px; height: 32px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; text-decoration: none; }
+.action-btn--edit   { background: rgba(108,92,231,0.1); } .action-btn--edit:hover   { background: rgba(108,92,231,0.25); }
+.action-btn--success { background: rgba(0,230,118,0.1); } .action-btn--success:hover { background: rgba(0,230,118,0.25); }
+.action-btn--danger { background: rgba(255,82,82,0.1);  } .action-btn--danger:hover  { background: rgba(255,82,82,0.25);  }
+.text-secondary     { color: #8888a4; }
+.text-muted         { color: #55556a; }
+.text-mono          { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.empty-state        { text-align: center; color: #55556a; font-size: 0.875rem; }
+
+/* ── Pagination ──────────────────────────────── */
+.pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 1.25rem; }
+.page-btn   { padding: 8px 16px; background: rgba(108,92,231,0.1); border: 1px solid rgba(108,92,231,0.2); border-radius: 8px; color: #6c5ce7; text-decoration: none; font-size: 0.875rem; transition: all 0.2s; }
+.page-btn:hover { background: rgba(108,92,231,0.2); }
+.page-info  { font-size: 0.85rem; color: #8888a4; }
+
+/* ── Modal ───────────────────────────────────── */
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
+.modal-backdrop.is-open { display: flex; }
+.modal          { width: 100%; max-width: 480px; padding: 0; overflow: hidden; }
+.modal-header   { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.5rem; border-bottom: 1px solid rgba(108,92,231,0.15); }
+.modal-title    { font-size: 1.1rem; font-weight: 600; color: #e4e4ef; margin: 0; }
+.modal-close    { background: none; border: none; color: #8888a4; font-size: 1.1rem; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: all 0.2s; }
+.modal-close:hover { background: rgba(255,82,82,0.1); color: #ff5252; }
+.modal-body     { padding: 1.5rem; }
+.modal-footer   { display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; border-top: 1px solid rgba(108,92,231,0.1); }
+
+.verify-description { font-size: 0.9rem; color: #e4e4ef; margin: 0 0 1rem; }
+.verify-list        { padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: #8888a4; margin: 0; }
+.verify-list li     { padding: 4px 0; }
+
+.verify-result {
+  margin-top: 1rem;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.verify-result--success {
+  background: rgba(0,230,118,0.1);
+  border: 1px solid rgba(0,230,118,0.2);
+  color: #00e676;
+}
+
+.verify-result--error {
+  background: rgba(255,82,82,0.1);
+  border: 1px solid rgba(255,82,82,0.2);
+  color: #ff5252;
+}
+
+/* ── Toast ───────────────────────────────────── */
+.toast { position: fixed; bottom: 1.5rem; right: 1.5rem; padding: 12px 20px; border-radius: 10px; font-size: 0.875rem; font-weight: 500; z-index: 2000; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; pointer-events: none; }
+.toast.is-visible { opacity: 1; transform: translateY(0); }
+.toast--success   { background: rgba(0,230,118,0.15); border: 1px solid rgba(0,230,118,0.3); color: #00e676; }
+.toast--error     { background: rgba(255,82,82,0.15);  border: 1px solid rgba(255,82,82,0.3);  color: #ff5252; }
+</style>
+
+<script>
+let currentTournamentId = null;
+
+function verifyTournament(btn) {
+  currentTournamentId = Number(btn.dataset.id);
+  document.getElementById('verify-tournament-name').textContent = btn.dataset.name ?? '';
+  document.getElementById('verify-result').style.display = 'none';
+  document.getElementById('verify-modal').classList.add('is-open');
+}
+
+function closeVerifyModal() {
+  document.getElementById('verify-modal').classList.remove('is-open');
+  currentTournamentId = null;
+}
+
+document.getElementById('btn-verify-confirm')?.addEventListener('click', async () => {
+  if (!currentTournamentId) return;
+
+  const btn    = document.getElementById('btn-verify-confirm');
+  const result = document.getElementById('verify-result');
+
+  btn.disabled    = true;
+  btn.textContent = 'Calculando ELO...';
+
+  try {
+    const res  = await fetch('/api/admin/verificar-torneo', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tournament_id: currentTournamentId }),
+    });
+    const data = await res.json();
+
+    result.style.display = 'block';
+
+    if (!res.ok || data.error) {
+      result.className  = 'verify-result verify-result--error';
+      result.textContent = data.error ?? 'Error al verificar.';
+      return;
+    }
+
+    result.className  = 'verify-result verify-result--success';
+    result.textContent = data.message ?? 'Torneo verificado correctamente.';
+
+    // Actualizar fila en la tabla
+    const row   = document.getElementById(`row-${currentTournamentId}`);
+    const badge = row?.querySelector('.status-badge');
+    const verifyBtn = row?.querySelector('.action-btn--success');
+
+    if (badge) {
+      badge.textContent = '✓ Verificado';
+      badge.className   = 'status-badge status-verified';
+    }
+    if (verifyBtn) verifyBtn.remove();
+
+    setTimeout(() => closeVerifyModal(), 2000);
+    showToast(data.message ?? 'Torneo verificado.', 'success');
+
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Verificar y calcular ELO';
+  }
+});
+
+async function deleteTournament(btn) {
+  const id   = Number(btn.dataset.id);
+  const name = btn.dataset.name ?? 'este torneo';
+
+  if (!confirm(`¿Eliminar "${name}"? Se eliminarán todos sus resultados.`)) return;
+
+  btn.disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/torneos', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) { showToast(data.error ?? 'Error.', 'error'); btn.disabled = false; return; }
+
+    document.getElementById(`row-${id}`)?.remove();
+    showToast(`Torneo "${name}" eliminado.`, 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+    btn.disabled = false;
+  }
+}
+
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVerifyModal(); });
+
+window.verifyTournament  = verifyTournament;
+window.closeVerifyModal  = closeVerifyModal;
+window.deleteTournament  = deleteTournament;
+</script>

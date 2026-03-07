@@ -1,0 +1,200 @@
+---
+// src/pages/admin/clubes/[id].astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { id } = Astro.params;
+
+if (!id || isNaN(Number(id))) {
+  return Astro.redirect('/admin/clubes');
+}
+
+const supabase = createServerClient();
+
+const [
+  { data: club },
+  { data: countries },
+  { data: rooms },
+] = await Promise.all([
+  supabase.from('clubs').select('*').eq('id', Number(id)).single(),
+  supabase.from('countries').select('id, name, flag_emoji').order('name'),
+  supabase.from('rooms').select('id, name').eq('is_active', true).order('name'),
+]);
+
+if (!club) {
+  return Astro.redirect('/admin/clubes');
+}
+
+const contactInfo = (club.contact_info ?? {}) as Record<string, string>;
+---
+
+<AdminLayout title={`Editar: ${club.name}`}>
+
+  <div class="page-header">
+    <a href="/admin/clubes" class="btn btn-secondary">← Volver</a>
+    <span class={`status-badge ${club.is_active ? 'status-verified' : 'status-inactive'}`}>
+      {club.is_active ? '✓ Activo' : '✗ Inactivo'}
+    </span>
+  </div>
+
+  <div class="glass-card form-card">
+    <h2 class="form-section-title">Información del Club</h2>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="name" class="form-label">Nombre del club *</label>
+        <input type="text" id="name" class="input-field" value={club.name} maxlength="100" />
+      </div>
+
+      <div class="form-group">
+        <label for="slug" class="form-label">
+          Slug *
+          <span class="label-hint">URL del club</span>
+        </label>
+        <input type="text" id="slug" class="input-field" value={club.slug} maxlength="100" />
+      </div>
+
+      <div class="form-group form-group--full">
+        <label for="description" class="form-label">Descripción</label>
+        <textarea
+          id="description"
+          class="input-field textarea-field"
+          maxlength="500"
+          rows="3"
+        >{club.description ?? ''}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="country_id" class="form-label">País</label>
+        <select id="country_id" class="input-field select-field">
+          <option value="">— Seleccionar país —</option>
+          {countries?.map(c => (
+            <option value={c.id} selected={c.id === club.country_id}>
+              {c.flag_emoji} {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="room_id" class="form-label">Sala principal</label>
+        <select id="room_id" class="input-field select-field">
+          <option value="">— Seleccionar sala —</option>
+          {rooms?.map(r => (
+            <option value={r.id} selected={r.id === club.room_id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-divider"></div>
+    <h2 class="form-section-title">Contacto <span class="optional-label">(opcional)</span></h2>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="telegram" class="form-label">📱 Telegram</label>
+        <input type="text" id="telegram" class="input-field" value={contactInfo.telegram ?? ''} placeholder="@sharkclub" />
+      </div>
+      <div class="form-group">
+        <label for="whatsapp" class="form-label">💬 WhatsApp</label>
+        <input type="text" id="whatsapp" class="input-field" value={contactInfo.whatsapp ?? ''} placeholder="+54 9 11 1234-5678" />
+      </div>
+      <div class="form-group">
+        <label for="instagram" class="form-label">📷 Instagram</label>
+        <input type="text" id="instagram" class="input-field" value={contactInfo.instagram ?? ''} placeholder="@sharkclub" />
+      </div>
+    </div>
+
+    <div class="form-error" id="form-error" role="alert"></div>
+
+    <div class="form-actions">
+      <a href="/admin/clubes" class="btn btn-secondary">Cancelar</a>
+      <button class="btn btn-primary" id="btn-guardar">Guardar Cambios</button>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style is:global>
+.form-card { padding: 2rem; max-width: 800px; }
+.form-section-title { font-size: 1rem; font-weight: 600; color: #e4e4ef; margin: 0 0 1.25rem; }
+.optional-label { font-size: 0.8rem; font-weight: 400; color: #55556a; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+.form-group--full { grid-column: 1 / -1; }
+.textarea-field { resize: vertical; min-height: 80px; font-family: inherit; }
+.select-field { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
+.form-divider { height: 1px; background: rgba(108, 92, 231, 0.1); margin: 1.5rem 0; }
+.form-error { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-top: 1rem; }
+.form-error.is-visible { display: block; }
+.form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
+</style>
+
+<script define:vars={{ clubId: club.id }}>
+const formError  = document.getElementById('form-error');
+const btnGuardar = document.getElementById('btn-guardar');
+
+btnGuardar?.addEventListener('click', async () => {
+  const name        = document.getElementById('name').value.trim();
+  const slug        = document.getElementById('slug').value.trim();
+  const description = document.getElementById('description').value.trim();
+  const country_id  = Number(document.getElementById('country_id').value) || null;
+  const room_id     = Number(document.getElementById('room_id').value)    || null;
+  const telegram    = document.getElementById('telegram').value.trim();
+  const whatsapp    = document.getElementById('whatsapp').value.trim();
+  const instagram   = document.getElementById('instagram').value.trim();
+
+  formError.classList.remove('is-visible');
+
+  if (!name || !slug) {
+    formError.textContent = 'Nombre y slug son requeridos.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    formError.textContent = 'El slug solo puede tener letras minúsculas, números y guiones.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  btnGuardar.disabled    = true;
+  btnGuardar.textContent = 'Guardando...';
+
+  try {
+    const contact_info = {};
+    if (telegram)  contact_info.telegram  = telegram;
+    if (whatsapp)  contact_info.whatsapp  = whatsapp;
+    if (instagram) contact_info.instagram = instagram;
+
+    const res = await fetch('/api/admin/clubes', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        id: clubId,
+        name, slug, description, country_id, room_id, contact_info,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      formError.textContent = data.error ?? 'Error al guardar.';
+      formError.classList.add('is-visible');
+      return;
+    }
+
+    window.location.href = '/admin/clubes';
+
+  } catch {
+    formError.textContent = 'Error de conexión.';
+    formError.classList.add('is-visible');
+  } finally {
+    btnGuardar.disabled    = false;
+    btnGuardar.textContent = 'Guardar Cambios';
+  }
+});
+</script>

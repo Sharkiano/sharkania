@@ -1,0 +1,372 @@
+---
+// src/pages/club-admin/index.astro
+import ClubAdminLayout from '@layouts/ClubAdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase    = createServerClient();
+const adminProfile = Astro.locals.adminProfile;
+
+if (!adminProfile?.club_id) {
+  return Astro.redirect('/club-admin/login');
+}
+
+const clubId = adminProfile.club_id;
+
+// ── Datos del club ───────────────────────────────────────
+const { data: club } = await supabase
+  .from('clubs')
+  .select('*, countries ( name, flag_emoji ), rooms ( name )')
+  .eq('id', clubId)
+  .single();
+
+// ── Estadísticas en paralelo ─────────────────────────────
+const [
+  { count: totalTournaments },
+  { count: pendingTournaments },
+  { count: verifiedTournaments },
+  { data: recentTournaments },
+  { data: leagues },
+] = await Promise.all([
+  supabase
+    .from('tournaments')
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId),
+  supabase
+    .from('tournaments')
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId)
+    .eq('is_verified', false),
+  supabase
+    .from('tournaments')
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId)
+    .eq('is_verified', true),
+  supabase
+    .from('tournaments')
+    .select('id, name, date, total_players, is_verified, leagues ( name )')
+    .eq('club_id', clubId)
+    .order('date', { ascending: false })
+    .limit(5),
+  supabase
+    .from('leagues')
+    .select('id, name, season_start, season_end, is_active')
+    .eq('club_id', clubId)
+    .eq('is_active', true),
+]);
+
+// ── Total jugadores únicos del club ──────────────────────
+const { data: playerIds } = await supabase
+  .from('tournament_results')
+  .select('player_id')
+  .in(
+    'tournament_id',
+    (await supabase.from('tournaments').select('id').eq('club_id', clubId)).data?.map(t => t.id) ?? []
+  );
+
+const uniquePlayers = new Set(playerIds?.map(p => p.player_id) ?? []).size;
+
+const country = club?.countries as { name: string; flag_emoji: string } | null;
+const room    = club?.rooms     as { name: string } | null;
+
+const stats = [
+  { label: 'Torneos totales',    value: totalTournaments    ?? 0, icon: '🏆', color: 'purple' },
+  { label: 'Verificados',        value: verifiedTournaments ?? 0, icon: '✅', color: 'green'  },
+  { label: 'Pendientes',         value: pendingTournaments  ?? 0, icon: '⏳', color: 'warning' },
+  { label: 'Jugadores únicos',   value: uniquePlayers,            icon: '👤', color: 'cyan'   },
+];
+---
+
+<ClubAdminLayout title="Dashboard" clubName={club?.name ?? 'Mi Club'}>
+
+  <!-- ── Info del club ──────────────────────────────────── -->
+  <div class="club-info-banner glass-card">
+    <div class="club-info-avatar">
+      {club?.name.charAt(0).toUpperCase() ?? '?'}
+    </div>
+    <div class="club-info-body">
+      <h2 class="club-info-name">{club?.name ?? 'Mi Club'}</h2>
+      <div class="club-info-meta">
+        {country && <span>{country.flag_emoji} {country.name}</span>}
+        {room    && <span>🎰 {room.name}</span>}
+        {club?.description && <span>📝 {club.description}</span>}
+      </div>
+    </div>
+    <a href="/club-admin/subir-resultados" class="btn btn-primary club-info-cta">
+      ⬆️ Subir Resultados
+    </a>
+  </div>
+
+  <!-- ── Stats ─────────────────────────────────────────── -->
+  <div class="stats-grid" style="margin-bottom:1.5rem;">
+    {stats.map(stat => (
+      <div class={`stat-card stat-card--${stat.color}`}>
+        <div class="stat-card-icon">{stat.icon}</div>
+        <div class="stat-card-body">
+          <div class={`stat-card-value ${stat.color === 'warning' && stat.value > 0 ? 'stat-card-value--warning' : ''}`}>
+            {stat.value}
+          </div>
+          <div class="stat-card-label">{stat.label}</div>
+        </div>
+      </div>
+    ))}
+  </div>
+
+  <!-- ── Grid ──────────────────────────────────────────── -->
+  <div class="dashboard-grid">
+
+    <!-- Torneos recientes -->
+    <div class="glass-card dashboard-card">
+      <div class="card-header">
+        <h3 class="card-title">🏆 Torneos Recientes</h3>
+        <a href="/club-admin/torneos" class="card-link">Ver todos →</a>
+      </div>
+      <div class="card-body">
+        {recentTournaments && recentTournaments.length > 0 ? (
+          <table class="poker-table">
+            <thead>
+              <tr>
+                <th>Torneo</th>
+                <th>Fecha</th>
+                <th>Jugadores</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTournaments.map(t => {
+                const league = t.leagues as { name: string } | null;
+                return (
+                  <tr>
+                    <td>
+                      <div class="tournament-name-cell">
+                        <span class="tournament-name">{t.name}</span>
+                        {league && <span class="tournament-league">{league.name}</span>}
+                      </div>
+                    </td>
+                    <td class="text-mono text-secondary" style="font-size:0.8rem;">{t.date}</td>
+                    <td class="text-mono">{t.total_players}</td>
+                    <td>
+                      {t.is_verified
+                        ? <span class="status-badge status-verified">✓ Verificado</span>
+                        : <span class="status-badge status-pending">⏳ Pendiente</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div class="empty-state">
+            <p>No hay torneos cargados aún.</p>
+            <a href="/club-admin/subir-resultados" class="btn btn-primary" style="margin-top:0.75rem;display:inline-flex;">
+              Subir primer torneo
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Ligas activas -->
+    <div class="glass-card dashboard-card">
+      <div class="card-header">
+        <h3 class="card-title">📋 Ligas Activas</h3>
+      </div>
+      <div class="card-body">
+        {leagues && leagues.length > 0 ? (
+          <div class="leagues-list">
+            {leagues.map(league => (
+              <div class="league-item">
+                <div class="league-item-icon">🏆</div>
+                <div class="league-item-body">
+                  <div class="league-item-name">{league.name}</div>
+                  <div class="league-item-dates text-secondary">
+                    {league.season_start && league.season_end
+                      ? `${league.season_start} → ${league.season_end}`
+                      : league.season_start
+                        ? `Desde ${league.season_start}`
+                        : 'Sin fechas definidas'
+                    }
+                  </div>
+                </div>
+                <span class="status-badge status-verified">Activa</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <p>No hay ligas activas.</p>
+            <p class="empty-hint">Pedile al Super Admin que cree una liga para tu club.</p>
+          </div>
+        )}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Accesos rápidos ────────────────────────────────── -->
+  <div class="glass-card quick-actions-card">
+    <h3 class="card-title" style="margin-bottom:1rem;">⚡ Accesos Rápidos</h3>
+    <div class="quick-actions-grid">
+      <a href="/club-admin/subir-resultados" class="quick-action">⬆️ Subir Resultados CSV</a>
+      <a href="/club-admin/torneos"          class="quick-action">🏆 Mis Torneos</a>
+      <a href="/club-admin/mi-club"          class="quick-action">🏠 Ver Mi Club</a>
+      <a href={`/club/${club?.slug ?? ''}`}  class="quick-action">🌐 Ver página pública</a>
+    </div>
+  </div>
+
+</ClubAdminLayout>
+
+<style is:global>
+/* ── Stat cards ──────────────────────────────── */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
+.stat-card { background: #12121a; border: 1px solid rgba(108,92,231,0.1); border-radius: 12px; padding: 1.25rem; display: flex; align-items: center; gap: 1rem; transition: all 0.2s ease; }
+.stat-card--purple:hover { border-color: rgba(108,92,231,0.4); }
+.stat-card--cyan:hover   { border-color: rgba(0,206,201,0.4); }
+.stat-card--green:hover  { border-color: rgba(0,230,118,0.4); }
+.stat-card--warning      { border-color: rgba(255,215,64,0.2); }
+.stat-card-icon  { font-size: 1.75rem; flex-shrink: 0; }
+.stat-card-value { font-family: 'JetBrains Mono', monospace; font-size: 1.75rem; font-weight: 700; color: #e4e4ef; line-height: 1; }
+.stat-card-value--warning { color: #ffd740; }
+.stat-card-label { font-size: 0.78rem; color: #8888a4; margin-top: 0.2rem; }
+
+/* ── Dashboard grid ──────────────────────────── */
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+@media (max-width: 1024px) { .dashboard-grid { grid-template-columns: 1fr; } }
+.dashboard-card { padding: 0; overflow: hidden; }
+.card-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid rgba(108,92,231,0.1); }
+.card-title  { font-size: 0.95rem; font-weight: 600; color: #e4e4ef; margin: 0; }
+.card-link   { font-size: 0.8rem; color: #6c5ce7; text-decoration: none; transition: color 0.2s; }
+.card-link:hover { color: #a855f7; }
+.card-body   { padding: 0.5rem 0; }
+
+/* ── Table inside card ───────────────────────── */
+.dashboard-card .poker-table thead th { padding: 8px 16px; font-size: 0.7rem; }
+.dashboard-card .poker-table tbody td { padding: 10px 16px; font-size: 0.85rem; }
+.text-secondary { color: #8888a4; }
+.text-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+
+/* ── Status badges ───────────────────────────── */
+.status-badge    { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.status-pending  { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.2); }
+.status-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+
+/* ── Empty state ─────────────────────────────── */
+.empty-state { padding: 2rem; text-align: center; color: #55556a; font-size: 0.875rem; }
+.empty-hint  { font-size: 0.8rem; margin-top: 0.25rem; color: #3d3d52; }
+
+/* ── Quick actions ───────────────────────────── */
+.quick-actions-card { padding: 1.25rem; margin-bottom: 1.5rem; }
+.quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; }
+.quick-action { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; background: rgba(108,92,231,0.08); border: 1px solid rgba(108,92,231,0.15); border-radius: 10px; color: #e4e4ef; text-decoration: none; font-size: 0.875rem; font-weight: 500; transition: all 0.2s ease; }
+.quick-action:hover { background: rgba(108,92,231,0.18); border-color: rgba(108,92,231,0.35); transform: translateY(-1px); }
+
+/* ── Club info banner ────────────────────────── */
+.club-info-banner { display: flex; align-items: center; gap: 1.25rem; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.club-info-avatar { width: 52px; height: 52px; border-radius: 14px; background: linear-gradient(135deg, #00cec9, #6c5ce7); display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.club-info-body  { flex: 1; min-width: 0; }
+.club-info-name  { font-size: 1.2rem; font-weight: 700; color: #e4e4ef; margin: 0 0 0.35rem; }
+.club-info-meta  { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.82rem; color: #8888a4; }
+.club-info-cta   { flex-shrink: 0; }
+
+/* ── Tournament name cell ────────────────────── */
+.tournament-name-cell { display: flex; flex-direction: column; gap: 2px; }
+.tournament-name   { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.tournament-league { font-size: 0.75rem; color: #6c5ce7; }
+
+/* ── Leagues list ────────────────────────────── */
+.leagues-list { padding: 0.5rem 0; }
+.league-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,0.03); transition: background 0.15s; }
+.league-item:hover      { background: rgba(108,92,231,0.05); }
+.league-item:last-child { border-bottom: none; }
+.league-item-icon  { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, #ffd740, #f5af19); display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+.league-item-body  { flex: 1; }
+.league-item-name  { font-size: 0.875rem; font-weight: 500; color: #e4e4ef; }
+.league-item-dates { font-size: 0.75rem; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+</style>
+
+<style is:global>
+/* ── Club info banner ────────────────────────── */
+.club-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.club-info-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #00cec9, #6c5ce7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.club-info-body { flex: 1; min-width: 0; }
+
+.club-info-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  margin: 0 0 0.35rem;
+}
+
+.club-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  color: #8888a4;
+}
+
+.club-info-cta { flex-shrink: 0; }
+
+/* ── Tournament name cell ────────────────────── */
+.tournament-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tournament-name  { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.tournament-league { font-size: 0.75rem; color: #6c5ce7; }
+
+/* ── Leagues list ────────────────────────────── */
+.leagues-list { padding: 0.5rem 0; }
+
+.league-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: background 0.15s;
+}
+
+.league-item:hover     { background: rgba(108, 92, 231, 0.05); }
+.league-item:last-child { border-bottom: none; }
+
+.league-item-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ffd740, #f5af19);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.league-item-body  { flex: 1; }
+.league-item-name  { font-size: 0.875rem; font-weight: 500; color: #e4e4ef; }
+.league-item-dates { font-size: 0.75rem; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+</style>

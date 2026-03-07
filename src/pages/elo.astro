@@ -1,0 +1,446 @@
+---
+import PublicLayout from '@layouts/PublicLayout.astro';
+---
+<PublicLayout title="Cómo funciona el ELO — Sharkania">
+<div class="section-wrap">
+
+  <nav class="bc">
+    <a href="/" class="bc-link">INICIO</a>
+    <span class="bc-sep">/</span>
+    <span class="bc-current">SISTEMA ELO</span>
+  </nav>
+
+  <div class="page-header">
+    <div class="ph-label">GUÍA</div>
+    <h1 class="ph-title">¿CÓMO FUNCIONA EL RANKING?</h1>
+    <p class="ph-sub">Todo lo que necesitas saber sobre el sistema de puntuación de Sharkania</p>
+  </div>
+
+  <!-- Intro -->
+  <div class="intro-card">
+    <div class="intro-icon">🦈</div>
+    <div class="intro-text">
+      <p>El ranking de Sharkania usa un sistema llamado <strong>ELO</strong>, el mismo que se usa en ajedrez y en muchos videojuegos competitivos. La idea es simple: <strong>no importa cuántos torneos juegues, sino qué tan bien juegas en cada uno</strong>. Ganarle a jugadores fuertes te sube más que ganarle a jugadores débiles.</p>
+    </div>
+  </div>
+
+  <!-- Sección 1: Rating inicial -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">01</span>
+      <div>
+        <h2 class="elo-sec-title">Tu punto de partida</h2>
+        <p class="elo-sec-sub">Todo jugador comienza con 1200 puntos</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>Cuando apareces por primera vez en un torneo cargado en Sharkania, el sistema te asigna <strong>1200 puntos ELO</strong>. Este es el punto de partida estándar — ni eres el mejor ni el peor. A partir de ahí, cada torneo que juegas sube o baja tu rating dependiendo de cómo te vayas.</p>
+      <div class="rating-scale">
+        <div class="rs-item rs-legend">
+          <span class="rs-badge">🏆</span>
+          <div class="rs-bar" style="width:100%"></div>
+          <span class="rs-label">Leyenda &nbsp;<strong>&gt; 1800</strong></span>
+        </div>
+        <div class="rs-item rs-master">
+          <span class="rs-badge">⭐</span>
+          <div class="rs-bar" style="width:83%"></div>
+          <span class="rs-label">Master &nbsp;<strong>1600 – 1800</strong></span>
+        </div>
+        <div class="rs-item rs-diamond">
+          <span class="rs-badge">🔷</span>
+          <div class="rs-bar" style="width:66%"></div>
+          <span class="rs-label">Diamante &nbsp;<strong>1400 – 1600</strong></span>
+        </div>
+        <div class="rs-item rs-gold">
+          <span class="rs-badge">🥇</span>
+          <div class="rs-bar" style="width:55%"></div>
+          <span class="rs-label">Oro &nbsp;<strong>1300 – 1400</strong></span>
+        </div>
+        <div class="rs-item rs-silver">
+          <span class="rs-badge">🥈</span>
+          <div class="rs-bar" style="width:45%"></div>
+          <span class="rs-label">Plata &nbsp;<strong>1200 – 1300</strong> ← punto de partida</span>
+        </div>
+        <div class="rs-item rs-bronze">
+          <span class="rs-badge">🥉</span>
+          <div class="rs-bar" style="width:33%"></div>
+          <span class="rs-label">Bronce &nbsp;<strong>1100 – 1200</strong></span>
+        </div>
+        <div class="rs-item rs-iron">
+          <span class="rs-badge">📍</span>
+          <div class="rs-bar" style="width:20%"></div>
+          <span class="rs-label">Aspirante &nbsp;<strong>&lt; 1100</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección 2: Cómo sube/baja -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">02</span>
+      <div>
+        <h2 class="elo-sec-title">¿Cuándo sube y cuándo baja tu ELO?</h2>
+        <p class="elo-sec-sub">Tu posición en el torneo es lo que más importa</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>El sistema convierte tu posición en el torneo a un número entre 0 y 1. Si quedas <strong>primero de 100 jugadores</strong>, tu rendimiento es 0.99 (casi perfecto). Si quedas <strong>último de 100</strong>, tu rendimiento es 0.01. Si quedas justo en el medio, es 0.50.</p>
+
+      <div class="example-grid">
+        <div class="eg-card eg-win">
+          <div class="eg-pos">#1</div>
+          <div class="eg-desc">de 50 jugadores</div>
+          <div class="eg-change up">+28 ELO</div>
+          <div class="eg-note">rendimiento: 1.00</div>
+        </div>
+        <div class="eg-card eg-mid">
+          <div class="eg-pos">#25</div>
+          <div class="eg-desc">de 50 jugadores</div>
+          <div class="eg-change neutral">≈ 0 ELO</div>
+          <div class="eg-note">rendimiento: 0.51</div>
+        </div>
+        <div class="eg-card eg-loss">
+          <div class="eg-pos">#50</div>
+          <div class="eg-desc">de 50 jugadores</div>
+          <div class="eg-change down">−18 ELO</div>
+          <div class="eg-note">rendimiento: 0.02</div>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <span class="ib-icon">💡</span>
+        <span>Si tu rendimiento fue <strong>mejor de lo esperado</strong> según tu rating, subes. Si fue <strong>peor de lo esperado</strong>, bajas. Si fue exactamente lo esperado, prácticamente no cambia.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección 3: El factor del rival -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">03</span>
+      <div>
+        <h2 class="elo-sec-title">Ganarle a los mejores vale más</h2>
+        <p class="elo-sec-sub">El rating promedio de tus rivales afecta cuánto ganas o pierdes</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>El sistema compara tu rating con el <strong>promedio de todos los jugadores del torneo</strong>. Si eres el más fuerte del torneo y ganas, el sistema lo "esperaba" — así que subes menos. Pero si eres el más débil y quedas en el top 3, el sistema se sorprende y te sube bastante.</p>
+
+      <div class="comparison-table">
+        <div class="ct-header">
+          <span>Situación</span>
+          <span>Resultado</span>
+          <span>ELO ganado</span>
+        </div>
+        <div class="ct-row">
+          <span>Eres el favorito (rating alto) y ganas</span>
+          <span class="ct-tag ct-expected">Esperado</span>
+          <span class="ct-val up">+12 pts</span>
+        </div>
+        <div class="ct-row">
+          <span>Eres el underdog (rating bajo) y ganas</span>
+          <span class="ct-tag ct-surprise">Sorpresa</span>
+          <span class="ct-val up">+38 pts</span>
+        </div>
+        <div class="ct-row">
+          <span>Eres el favorito y quedas en la mitad</span>
+          <span class="ct-tag ct-bad">Bajo rendimiento</span>
+          <span class="ct-val down">−15 pts</span>
+        </div>
+        <div class="ct-row">
+          <span>Eres el underdog y quedas último</span>
+          <span class="ct-tag ct-expected">Esperado</span>
+          <span class="ct-val down">−8 pts</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección 4: Volatilidad -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">04</span>
+      <div>
+        <h2 class="elo-sec-title">Al principio cambia más rápido</h2>
+        <p class="elo-sec-sub">El sistema se adapta a cuánta experiencia tienes</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>Cuando recién empiezas, el sistema no sabe bien cuál es tu nivel real. Por eso los primeros torneos mueven más tu ELO — para encontrar tu lugar en el ranking más rápido. Una vez que el sistema te conoce mejor, los cambios son más graduales.</p>
+
+      <div class="kfactor-bars">
+        <div class="kf-row">
+          <span class="kf-label">Primeros 30 torneos</span>
+          <div class="kf-track">
+            <div class="kf-fill kf-new" style="width:100%">Factor K: 60</div>
+          </div>
+          <span class="kf-tag">Alta volatilidad</span>
+        </div>
+        <div class="kf-row">
+          <span class="kf-label">30 – 100 torneos</span>
+          <div class="kf-track">
+            <div class="kf-fill kf-std" style="width:53%">Factor K: 32</div>
+          </div>
+          <span class="kf-tag">Media</span>
+        </div>
+        <div class="kf-row">
+          <span class="kf-label">Más de 100 torneos</span>
+          <div class="kf-track">
+            <div class="kf-fill kf-vet" style="width:33%">Factor K: 20</div>
+          </div>
+          <span class="kf-tag">Estable</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección 5: Tamaño del torneo -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">05</span>
+      <div>
+        <h2 class="elo-sec-title">Los torneos grandes pesan más</h2>
+        <p class="elo-sec-sub">Ganar un torneo de 200 jugadores vale más que uno de 10</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>No es lo mismo ganar una mesa de 8 amigos que ganar un torneo de 300 personas. El sistema usa una escala <strong>logarítmica</strong> para que los torneos más grandes tengan más impacto, pero sin que la diferencia sea absurda.</p>
+
+      <div class="weight-table">
+        <div class="wt-header">
+          <span>Jugadores en el torneo</span>
+          <span>Peso relativo</span>
+          <span>ELO ganado al ganar (aprox.)</span>
+        </div>
+        <div class="wt-row">
+          <span>10 jugadores</span>
+          <span class="wt-weight">× 1.0</span>
+          <span class="wt-elo up">+30 pts</span>
+        </div>
+        <div class="wt-row">
+          <span>50 jugadores</span>
+          <span class="wt-weight">× 1.7</span>
+          <span class="wt-elo up">+51 pts</span>
+        </div>
+        <div class="wt-row">
+          <span>100 jugadores</span>
+          <span class="wt-weight">× 2.0</span>
+          <span class="wt-elo up">+60 pts</span>
+        </div>
+        <div class="wt-row">
+          <span>500 jugadores</span>
+          <span class="wt-weight">× 2.7</span>
+          <span class="wt-elo up">+81 pts</span>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <span class="ib-icon">💡</span>
+        <span>Los torneos con <strong>buy-in más alto</strong> también tienen un pequeño bonus de peso (hasta +30%), porque representan competencia más seria.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección 6: Inactividad -->
+  <div class="elo-section">
+    <div class="elo-sec-header">
+      <span class="elo-sec-num">06</span>
+      <div>
+        <h2 class="elo-sec-title">Si dejas de jugar, tu rating baja lentamente</h2>
+        <p class="elo-sec-sub">El sistema penaliza la inactividad prolongada</p>
+      </div>
+    </div>
+    <div class="elo-sec-body">
+      <p>Para que el ranking refleje la actividad actual, los jugadores que llevan mucho tiempo sin jugar van perdiendo puntos gradualmente hacia el promedio (1200). Esto evita que alguien juegue 5 torneos, acumule ELO y desaparezca para siempre manteniendo una posición alta.</p>
+
+      <div class="decay-timeline">
+        <div class="dt-item dt-ok">
+          <div class="dt-dot"></div>
+          <div class="dt-content">
+            <strong>0 – 60 días sin jugar</strong>
+            <span>Sin penalización. Tu rating se mantiene intacto.</span>
+          </div>
+        </div>
+        <div class="dt-item dt-warn">
+          <div class="dt-dot"></div>
+          <div class="dt-content">
+            <strong>60 – 90 días sin jugar</strong>
+            <span>Comienzas a perder un 2% mensual de la diferencia con 1200.</span>
+          </div>
+        </div>
+        <div class="dt-item dt-bad">
+          <div class="dt-dot"></div>
+          <div class="dt-content">
+            <strong>Más de 6 meses sin jugar</strong>
+            <span>El decay se detiene. Máximo un 12% de tu diferencia con 1200 en total.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-box info-box--tip">
+        <span class="ib-icon">🃏</span>
+        <span>Si tienes 1500 ELO y no juegas por 3 meses, perderías aproximadamente <strong>12 puntos</strong> (2% de la diferencia de 300 × 2 meses). Nada dramático — pero sí un incentivo para mantenerse activo.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA Comparador -->
+  <div class="cta-wrap">
+    <div class="cta-card">
+      <div class="cta-icon">⚔️</div>
+      <div class="cta-text">
+        <h3>¿Quieres ver cómo te comparas con otro jugador?</h3>
+        <p>Usa el comparador para ver estadísticas cara a cara, historial ELO y enfrentamientos directos.</p>
+      </div>
+      <a href="/comparar" class="cta-btn">IR AL COMPARADOR →</a>
+    </div>
+  </div>
+
+</div>
+</PublicLayout>
+
+<style>
+:root {
+  --bg2: #12121a;
+  --bg3: #1a1a2e;
+  --accent:  #6c5ce7;
+  --accent2: #00cec9;
+  --success: #00e676;
+  --danger:  #ff5252;
+  --warning: #ffd740;
+  --text1: #e4e4ef;
+  --text2: rgba(255,255,255,0.6);
+  --text3: rgba(255,255,255,0.35);
+}
+
+/* ── Breadcrumb ── */
+.bc { display: flex; align-items: center; gap: 8px; padding: 24px 0 4px; }
+.bc-link { font-family: 'Barlow Condensed', sans-serif; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.18em; color: var(--text2); text-decoration: none; text-transform: uppercase; transition: color 0.2s; }
+.bc-link:hover { color: var(--accent2); }
+.bc-sep  { font-size: 0.65rem; color: rgba(255,255,255,0.5); }
+.bc-current { font-family: 'Barlow Condensed', sans-serif; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.18em; color: var(--accent2); text-transform: uppercase; }
+
+/* ── Page header ── */
+.page-header { padding: 12px 0 32px; }
+.ph-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.3em; color: var(--accent2); text-transform: uppercase; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ph-label::before { content: ''; display: block; width: 28px; height: 2px; background: var(--accent2); }
+.ph-title { font-family: 'Barlow Condensed', sans-serif; font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1; margin: 0 0 8px; }
+.ph-sub { font-size: 0.9rem; color: var(--text2); margin: 0; }
+
+/* ── Intro card ── */
+.intro-card { display: flex; gap: 20px; align-items: flex-start; background: var(--bg3); border: 1px solid rgba(108,92,231,0.2); border-radius: 16px; padding: 24px 28px; margin-bottom: 32px; }
+.intro-icon { font-size: 2.5rem; flex-shrink: 0; }
+.intro-text p { margin: 0; font-size: 1rem; color: var(--text1); line-height: 1.7; }
+.intro-text strong { color: var(--accent2); }
+
+/* ── Secciones ── */
+.elo-section { background: var(--bg2); border: 1px solid rgba(108,92,231,0.1); border-radius: 16px; margin-bottom: 24px; overflow: hidden; }
+.elo-sec-header { display: flex; align-items: center; gap: 20px; padding: 24px 28px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.elo-sec-num { font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700; color: rgba(108,92,231,0.3); line-height: 1; flex-shrink: 0; }
+.elo-sec-title { font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 2px; }
+.elo-sec-sub { font-size: 0.8rem; color: var(--text2); margin: 0; }
+.elo-sec-body { padding: 24px 28px; display: flex; flex-direction: column; gap: 20px; }
+.elo-sec-body p { margin: 0; font-size: 0.95rem; color: var(--text1); line-height: 1.7; }
+.elo-sec-body strong { color: #fff; }
+
+/* ── Rating scale ── */
+.rating-scale { display: flex; flex-direction: column; gap: 8px; }
+.rs-item { display: grid; grid-template-columns: 28px 1fr 200px; align-items: center; gap: 12px; }
+.rs-badge { font-size: 1rem; text-align: center; }
+.rs-bar { height: 8px; border-radius: 4px; }
+.rs-legend .rs-bar  { background: linear-gradient(90deg, #f12711, #f5af19); }
+.rs-master .rs-bar  { background: linear-gradient(90deg, #6c5ce7, #a855f7); }
+.rs-diamond .rs-bar { background: linear-gradient(90deg, #448aff, #00cec9); }
+.rs-gold .rs-bar    { background: linear-gradient(90deg, #f5af19, #ffd740); }
+.rs-silver .rs-bar  { background: rgba(255,255,255,0.35); }
+.rs-bronze .rs-bar  { background: linear-gradient(90deg, #a1887f, #d7ccc8); }
+.rs-iron .rs-bar    { background: rgba(255,255,255,0.12); }
+.rs-label { font-family: 'Barlow Condensed', sans-serif; font-size: 0.82rem; color: var(--text2); }
+.rs-label strong { color: var(--text1); }
+
+/* ── Ejemplos ── */
+.example-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.eg-card { background: var(--bg3); border-radius: 12px; padding: 20px 16px; text-align: center; border: 1px solid rgba(255,255,255,0.06); }
+.eg-pos { font-family: 'Barlow Condensed', sans-serif; font-size: 2rem; font-weight: 900; color: #fff; line-height: 1; }
+.eg-desc { font-size: 0.75rem; color: var(--text2); margin: 4px 0 12px; }
+.eg-change { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 700; }
+.eg-note { font-size: 0.7rem; color: var(--text3); margin-top: 4px; }
+.up { color: var(--success); }
+.down { color: var(--danger); }
+.neutral { color: var(--text2); }
+
+/* ── Info box ── */
+.info-box { display: flex; gap: 12px; align-items: flex-start; background: rgba(108,92,231,0.08); border: 1px solid rgba(108,92,231,0.2); border-radius: 10px; padding: 14px 16px; font-size: 0.88rem; color: var(--text1); line-height: 1.6; }
+.info-box--tip { background: rgba(0,206,201,0.07); border-color: rgba(0,206,201,0.2); }
+.ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.info-box strong { color: #fff; }
+
+/* ── Comparison table ── */
+.comparison-table { border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
+.ct-header { display: grid; grid-template-columns: 1fr 160px 120px; padding: 10px 16px; background: rgba(108,92,231,0.1); font-family: 'Barlow Condensed', sans-serif; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.15em; color: rgba(0,229,255,0.9); text-transform: uppercase; }
+.ct-row { display: grid; grid-template-columns: 1fr 160px 120px; align-items: center; padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.04); font-size: 0.88rem; color: var(--text1); }
+.ct-row:hover { background: rgba(255,255,255,0.02); }
+.ct-tag { display: inline-block; font-family: 'Barlow Condensed', sans-serif; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; }
+.ct-expected { background: rgba(255,255,255,0.1); color: var(--text2); }
+.ct-surprise  { background: rgba(0,230,118,0.15); color: var(--success); }
+.ct-bad       { background: rgba(255,82,82,0.15);  color: var(--danger); }
+.ct-val { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 700; }
+
+/* ── K Factor bars ── */
+.kfactor-bars { display: flex; flex-direction: column; gap: 14px; }
+.kf-row { display: grid; grid-template-columns: 180px 1fr 120px; align-items: center; gap: 16px; }
+.kf-label { font-size: 0.85rem; color: var(--text2); }
+.kf-track { background: rgba(255,255,255,0.06); border-radius: 6px; height: 32px; overflow: hidden; }
+.kf-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 12px; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 700; color: #fff; white-space: nowrap; }
+.kf-new { background: linear-gradient(90deg, #6c5ce7, #a855f7); }
+.kf-std { background: linear-gradient(90deg, #448aff, #00cec9); }
+.kf-vet { background: rgba(255,255,255,0.2); }
+.kf-tag { font-size: 0.75rem; color: var(--text3); }
+
+/* ── Weight table ── */
+.weight-table { border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
+.wt-header { display: grid; grid-template-columns: 1fr 120px 200px; padding: 10px 16px; background: rgba(108,92,231,0.1); font-family: 'Barlow Condensed', sans-serif; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.15em; color: rgba(0,229,255,0.9); text-transform: uppercase; }
+.wt-row { display: grid; grid-template-columns: 1fr 120px 200px; align-items: center; padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.04); font-size: 0.9rem; color: var(--text1); }
+.wt-row:hover { background: rgba(255,255,255,0.02); }
+.wt-weight { font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; color: var(--accent2); font-weight: 700; }
+.wt-elo { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; }
+
+/* ── Decay timeline ── */
+.decay-timeline { display: flex; flex-direction: column; gap: 0; position: relative; padding-left: 20px; }
+.decay-timeline::before { content: ''; position: absolute; left: 7px; top: 12px; bottom: 12px; width: 2px; background: rgba(255,255,255,0.1); }
+.dt-item { display: flex; gap: 20px; align-items: flex-start; padding: 0 0 20px; position: relative; }
+.dt-item:last-child { padding-bottom: 0; }
+.dt-dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; border: 2px solid var(--bg2); }
+.dt-ok   .dt-dot { background: var(--success); }
+.dt-warn .dt-dot { background: var(--warning); }
+.dt-bad  .dt-dot { background: var(--danger); }
+.dt-content { display: flex; flex-direction: column; gap: 4px; }
+.dt-content strong { font-size: 0.92rem; color: #fff; }
+.dt-content span { font-size: 0.85rem; color: var(--text2); }
+
+/* ── CTA ── */
+.cta-wrap { margin-top: 40px; margin-bottom: 40px; }
+.cta-card { display: flex; align-items: center; gap: 24px; background: linear-gradient(135deg, rgba(108,92,231,0.15), rgba(0,206,201,0.1)); border: 1px solid rgba(108,92,231,0.3); border-radius: 16px; padding: 28px 32px; }
+.cta-icon { font-size: 2.5rem; flex-shrink: 0; }
+.cta-text { flex: 1; }
+.cta-text h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 1.2rem; font-weight: 800; color: #fff; text-transform: uppercase; margin: 0 0 6px; }
+.cta-text p { font-size: 0.85rem; color: var(--text2); margin: 0; }
+.cta-btn { flex-shrink: 0; background: linear-gradient(135deg, #6c5ce7, #00cec9); color: #fff; text-decoration: none; font-family: 'Barlow Condensed', sans-serif; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.1em; padding: 12px 24px; border-radius: 10px; transition: opacity 0.2s, transform 0.2s; white-space: nowrap; }
+.cta-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .intro-card { flex-direction: column; gap: 12px; }
+  .example-grid { grid-template-columns: 1fr; }
+  .rs-item { grid-template-columns: 28px 1fr; }
+  .rs-label { display: none; }
+  .ct-header, .ct-row { grid-template-columns: 1fr 100px 80px; font-size: 0.8rem; }
+  .kf-row { grid-template-columns: 130px 1fr; }
+  .kf-tag { display: none; }
+  .wt-header, .wt-row { grid-template-columns: 1fr 80px 120px; font-size: 0.82rem; }
+  .cta-card { flex-direction: column; text-align: center; }
+  .elo-sec-body { padding: 20px 16px; }
+  .elo-sec-header { padding: 20px 16px 16px; }
+}
+</style>

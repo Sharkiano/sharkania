@@ -1,0 +1,306 @@
+---
+// src/pages/admin/jugadores/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+const search   = Astro.url.searchParams.get('q') ?? '';
+const page     = Number(Astro.url.searchParams.get('page') ?? 1);
+const limit    = 50;
+const offset   = (page - 1) * limit;
+
+let query = supabase
+  .from('players')
+  .select(`
+    id, nickname, slug, elo_rating, total_tournaments,
+    total_first_places, total_podiums, is_active, last_seen,
+    countries ( name, flag_emoji, code )
+  `, { count: 'exact' })
+  .order('elo_rating', { ascending: false })
+  .range(offset, offset + limit - 1);
+
+if (search) query = query.ilike('nickname', `%${search}%`);
+
+const { data: players, count } = await query;
+
+const totalPages = Math.ceil((count ?? 0) / limit);
+
+function getEloBadge(elo: number) {
+  if (elo >= 1800) return { label: '🏆 Leyenda', class: 'badge-legend' };
+  if (elo >= 1600) return { label: '⭐ Master',   class: 'badge-master' };
+  if (elo >= 1400) return { label: '🔷 Diamante', class: 'badge-diamond' };
+  if (elo >= 1300) return { label: '🥇 Oro',      class: 'badge-gold' };
+  if (elo >= 1200) return { label: '🥈 Plata',    class: 'badge-silver' };
+  if (elo >= 1100) return { label: '🥉 Bronce',   class: 'badge-bronze' };
+  return { label: '📍 Aspirante', class: 'badge-aspirant' };
+}
+---
+
+<AdminLayout title="Jugadores">
+
+  <!-- ── Header ───────────────────────────────────────── -->
+  <div class="page-header">
+    <p class="page-meta">
+      <span class="meta-badge meta-active">{count ?? 0} jugadores registrados</span>
+    </p>
+  </div>
+
+  <!-- ── Buscador ──────────────────────────────────────── -->
+  <div class="glass-card search-card">
+    <form method="get" action="/admin/jugadores" class="search-form">
+      <input
+        type="text"
+        name="q"
+        value={search}
+        class="input-field search-input"
+        placeholder="🔍 Buscar jugador por nick..."
+        autocomplete="off"
+      />
+      <button type="submit" class="btn btn-primary">Buscar</button>
+      {search && <a href="/admin/jugadores" class="btn btn-secondary">✕ Limpiar</a>}
+    </form>
+  </div>
+
+  <!-- ── Tabla ─────────────────────────────────────────── -->
+  <div class="glass-card table-card">
+    {players && players.length > 0 && (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Jugador</th>
+            <th>ELO</th>
+            <th>Categoría</th>
+            <th>Torneos</th>
+            <th>🥇</th>
+            <th>Podios</th>
+            <th>Último torneo</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+  {players.map(player => {
+    const country = player.countries as { name: string; flag_emoji: string; code: string } | null;
+    const badge   = getEloBadge(player.elo_rating ?? 1200);
+    const rank    = offset + players.indexOf(player) + 1;
+    return (
+      <tr id={`row-${player.id}`}>
+        <td class="text-mono text-secondary">#{rank}</td>
+        <td>
+          <div class="player-name-cell">
+            <div class="player-avatar">{player.nickname.charAt(0).toUpperCase()}</div>
+            <div>
+              <div class="player-nick">{player.nickname}</div>
+              {country && <div class="player-country">{country.flag_emoji} {country.name}</div>}
+            </div>
+          </div>
+        </td>
+        <td><span class="elo-value">{player.elo_rating ?? 1200}</span></td>
+        <td><span class={`elo-badge ${badge.class}`}>{badge.label}</span></td>
+        <td class="text-mono">{player.total_tournaments ?? 0}</td>
+        <td class="text-mono">{player.total_first_places ?? 0}</td>
+        <td class="text-mono">{player.total_podiums ?? 0}</td>
+        <td class="text-mono text-secondary" style="font-size:0.78rem;">{player.last_seen ?? '—'}</td>
+        <td>
+          <span class={`status-badge ${player.is_active ? 'status-verified' : 'status-inactive'}`}>
+            {player.is_active ? '✓ Activo' : '✗ Inactivo'}
+          </span>
+        </td>
+        <td>
+          <div class="action-btns">
+            <a href={`/admin/jugadores/${player.id}`} class="action-btn action-btn--edit">✏️</a>
+            <button
+              class={`action-btn ${player.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
+              data-id={player.id}
+              data-active={String(player.is_active)}
+              onclick="togglePlayer(this)"
+            >{player.is_active ? '⏸' : '▶'}</button>
+          </div>
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
+      </table>
+    )}
+    {(!players || players.length === 0) && (
+      <div class="empty-state" style="padding:3rem;">
+        <p style="font-size:2rem;margin:0;">👤</p>
+        <p>{search ? `No se encontraron jugadores con "${search}".` : 'No hay jugadores registrados aún.'}</p>
+      </div>
+    )}
+  </div>
+
+  <!-- ── Paginación ─────────────────────────────────────── -->
+  {totalPages > 1 && (
+    <div class="pagination">
+      {page > 1 && (
+        <a href={`/admin/jugadores?page=${page-1}${search ? `&q=${search}` : ''}`} class="page-btn">← Anterior</a>
+      )}
+      <span class="page-info">Página {page} de {totalPages}</span>
+      {page < totalPages && (
+        <a href={`/admin/jugadores?page=${page+1}${search ? `&q=${search}` : ''}`} class="page-btn">Siguiente →</a>
+      )}
+    </div>
+  )}
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</AdminLayout>
+
+<style is:global>
+/* ── Search ──────────────────────────────────── */
+.search-card  { padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+.search-form  { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 200px; }
+
+/* ── Table card ──────────────────────────────── */
+.table-card   { padding: 0; overflow: hidden; overflow-x: auto; }
+
+/* ── Player name cell ────────────────────────── */
+.player-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.player-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.player-nick    { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.player-country { font-size: 0.75rem; color: #55556a; margin-top: 1px; }
+
+/* ── ELO ─────────────────────────────────────── */
+.elo-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #6c5ce7;
+}
+
+.elo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-legend   { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.badge-master   { background: linear-gradient(135deg, #6c5ce7, #a855f7); color: #fff; }
+.badge-diamond  { background: linear-gradient(135deg, #448aff, #00cec9); color: #fff; }
+.badge-gold     { background: linear-gradient(135deg, #ffd740, #f5af19); color: #000; }
+.badge-silver   { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.badge-bronze   { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.badge-aspirant { background: rgba(85,85,106,0.3); color: #8888a4; border: 1px solid rgba(85,85,106,0.4); }
+
+/* ── Misc ────────────────────────────────────── */
+.page-header  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem; }
+.page-meta    { display: flex; gap: 0.5rem; margin: 0; flex-wrap: wrap; }
+.meta-badge   { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.meta-active  { background: rgba(0,230,118,0.1); color: #00e676; border: 1px solid rgba(0,230,118,0.2); }
+.status-badge    { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.status-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+.action-btns  { display: flex; gap: 0.5rem; }
+.action-btn   { width: 32px; height: 32px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; text-decoration: none; }
+.action-btn--edit    { background: rgba(108,92,231,0.1); }
+.action-btn--edit:hover    { background: rgba(108,92,231,0.25); }
+.action-btn--warning { background: rgba(255,215,64,0.1); }
+.action-btn--warning:hover { background: rgba(255,215,64,0.25); }
+.action-btn--success { background: rgba(0,230,118,0.1); }
+.action-btn--success:hover { background: rgba(0,230,118,0.25); }
+.text-secondary { color: #8888a4; }
+.text-muted     { color: #55556a; }
+.text-mono      { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.empty-state    { text-align: center; color: #55556a; font-size: 0.875rem; }
+
+/* ── Pagination ──────────────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.page-btn {
+  padding: 8px 16px;
+  background: rgba(108,92,231,0.1);
+  border: 1px solid rgba(108,92,231,0.2);
+  border-radius: 8px;
+  color: #6c5ce7;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.page-btn:hover { background: rgba(108,92,231,0.2); }
+.page-info      { font-size: 0.85rem; color: #8888a4; }
+
+/* ── Toast ───────────────────────────────────── */
+.toast { position: fixed; bottom: 1.5rem; right: 1.5rem; padding: 12px 20px; border-radius: 10px; font-size: 0.875rem; font-weight: 500; z-index: 2000; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; pointer-events: none; }
+.toast.is-visible { opacity: 1; transform: translateY(0); }
+.toast--success { background: rgba(0,230,118,0.15); border: 1px solid rgba(0,230,118,0.3); color: #00e676; }
+.toast--error   { background: rgba(255,82,82,0.15);  border: 1px solid rgba(255,82,82,0.3);  color: #ff5252; }
+</style>
+
+<script>
+async function togglePlayer(btn: HTMLElement) {
+  const id       = Number(btn.dataset.id);
+  const isActive = btn.dataset.active === 'true';
+  const newState = !isActive;
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/jugadores', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, is_active: newState }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) { showToast(data.error ?? 'Error.', 'error'); return; }
+
+    const row   = document.getElementById(`row-${id}`);
+    const badge = row?.querySelector('.status-badge') as HTMLElement;
+
+    btn.dataset.active = String(newState);
+    btn.textContent    = newState ? '⏸' : '▶';
+    btn.className      = `action-btn ${newState ? 'action-btn--warning' : 'action-btn--success'}`;
+
+    if (badge) {
+      badge.textContent = newState ? '✓ Activo' : '✗ Inactivo';
+      badge.className   = `status-badge ${newState ? 'status-verified' : 'status-inactive'}`;
+    }
+
+    showToast(`Jugador ${newState ? 'activado' : 'desactivado'}.`, 'success');
+  } finally {
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+(window as unknown as Record<string, unknown>).togglePlayer = togglePlayer;
+</script>

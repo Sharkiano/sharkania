@@ -1,0 +1,319 @@
+---
+// src/pages/clubes.astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: clubs } = await supabase
+  .from('clubs')
+  .select(`
+    id, name, slug, description, logo_url,
+    countries ( name, flag_emoji ),
+    rooms     ( name )
+  `)
+  .eq('is_active', true)
+  .order('name', { ascending: true });
+
+// Contar torneos por club
+const { data: tourneyCounts } = await supabase
+  .from('tournaments')
+  .select('club_id')
+  .eq('is_verified', true);
+
+const countMap = new Map<number, number>();
+(tourneyCounts ?? []).forEach(t => {
+  countMap.set(t.club_id, (countMap.get(t.club_id) ?? 0) + 1);
+});
+
+const processedClubs = (clubs ?? []).map(c => {
+  const country = c.countries as { name: string; flag_emoji: string } | null;
+  const room    = c.rooms     as { name: string } | null;
+  return {
+    id:          c.id,
+    name:        c.name,
+    slug:        c.slug,
+    description: c.description ?? '',
+    logoUrl:     c.logo_url ?? '',
+    countryName: country?.name ?? '',
+    countryFlag: country?.flag_emoji ?? '',
+    roomName:    room?.name ?? '',
+    tournaments: countMap.get(c.id) ?? 0,
+  };
+});
+---
+
+<PublicLayout
+  title="Clubes de póker"
+  description="Directorio de clubes de póker online hispanohablantes en Sharkiana. GGPoker, PokerStars, ClubGG y más."
+>
+
+<section class="clubes-page">
+  <div class="section-wrap">
+
+    <div class="page-header">
+      <div>
+        <div class="section-eyebrow">DIRECTORIO</div>
+        <h1 class="section-title">CLUBES</h1>
+      </div>
+      <span class="total-badge">{processedClubs.length} CLUBES</span>
+    </div>
+
+    {processedClubs.length > 0 ? (
+      <div class="clubs-grid">
+        {processedClubs.map(c => (
+          <a href={`/club/${c.slug}`} class="club-card crystal">
+            <div class="cc-top">
+              <div class="cc-avatar">
+                {c.logoUrl
+                  ? <img src={c.logoUrl} alt={c.name} class="cc-logo"/>
+                  : <span class="cc-letter">{c.name.charAt(0).toUpperCase()}</span>
+                }
+              </div>
+              <div class="cc-meta">
+                {c.countryFlag && (
+                  <span class="cc-country">{c.countryFlag} {c.countryName}</span>
+                )}
+                {c.roomName && (
+                  <span class="cc-room">{c.roomName}</span>
+                )}
+              </div>
+            </div>
+
+            <div class="cc-name">{c.name}</div>
+
+            {c.description && (
+              <p class="cc-desc">{c.description}</p>
+            )}
+
+            <div class="cc-footer">
+              <span class="cc-stat">
+                <span class="cc-stat-n">{c.tournaments}</span>
+                <span class="cc-stat-l">TORNEOS</span>
+              </span>
+              <span class="cc-arrow">VER CLUB →</span>
+            </div>
+          </a>
+        ))}
+      </div>
+    ) : (
+      <div class="empty-state crystal">
+        <p class="empty-text">NO HAY CLUBES REGISTRADOS AÚN</p>
+      </div>
+    )}
+
+  </div>
+</section>
+
+</PublicLayout>
+
+<style>
+.clubes-page { padding: 3rem 0 6rem; }
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.total-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 6px 14px;
+  border-radius: 50px;
+  backdrop-filter: blur(8px);
+}
+
+/* Grid */
+.clubs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+/* Club card */
+.club-card {
+  padding: 1.5rem;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border-radius: 14px;
+}
+
+.club-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 20px 60px rgba(0,0,0,0.5),
+    0 0 30px rgba(41,121,255,0.1),
+    inset 0 1px 0 rgba(255,255,255,0.32);
+}
+
+/* Top row */
+.cc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cc-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(41,121,255,0.3), rgba(0,229,255,0.2));
+  border: 1px solid rgba(0,229,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(41,121,255,0.15), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+.cc-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cc-letter {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(0,229,255,0.4);
+}
+
+.cc-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+
+.cc-country {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.65);
+}
+
+.cc-room {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+/* Name */
+.cc-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.club-card:hover .cc-name { color: var(--accent2); }
+
+/* Description */
+.cc-desc {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.6);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Footer */
+.cc-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.cc-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.cc-stat-n {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.cc-stat-l {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255,255,255,0.55);
+}
+
+.cc-arrow {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--accent2);
+  opacity: 0.7;
+  transition: opacity 0.2s, letter-spacing 0.2s;
+}
+
+.club-card:hover .cc-arrow {
+  opacity: 1;
+  letter-spacing: 0.22em;
+}
+
+/* Empty */
+.empty-state {
+  padding: 4rem;
+  text-align: center;
+}
+
+.empty-text {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.18);
+}
+
+@media (max-width: 640px) {
+  .clubs-grid { grid-template-columns: 1fr; }
+}
+/* ── Fix visibilidad sala ─── */
+.cc-room {
+  color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.18);
+}
+</style>
+</PublicLayout>

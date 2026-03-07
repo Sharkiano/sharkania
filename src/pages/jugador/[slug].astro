@@ -1,0 +1,750 @@
+---
+// src/pages/jugador/[slug].astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+import { getEloCategory } from '@lib/elo/calculator';
+
+const { slug } = Astro.params;
+const supabase  = createServerClient();
+
+if (!slug) return Astro.redirect('/buscar');
+
+// ── Datos del jugador ─────────────────────────
+const { data: player } = await supabase
+  .from('players')
+  .select(`
+    *,
+    countries ( name, code, flag_emoji )
+  `)
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .single();
+
+if (!player) return Astro.redirect('/buscar');
+
+// ── Historial ELO para el gráfico ─────────────
+const { data: eloHistory } = await supabase
+  .from('elo_history')
+  .select('date, elo_after, elo_change, tournament_id')
+  .eq('player_id', player.id)
+  .order('date', { ascending: true });
+
+// ── Historial de torneos ──────────────────────
+const { data: results } = await supabase
+  .from('tournament_results')
+  .select(`
+    position, prize, currency, elo_change, elo_before, elo_after, reentries,
+    tournaments (
+      id, name, date, total_players, buy_in, currency,
+      clubs   ( name, slug ),
+      leagues ( name ),
+      rooms   ( name )
+    )
+  `)
+  .eq('player_id', player.id)
+  .order('tournaments(date)', { ascending: false })
+  .limit(50);
+
+// ── Clubes donde ha jugado ────────────────────
+const { data: clubsPlayed } = await supabase
+  .from('tournament_results')
+  .select('tournaments ( clubs ( name, slug ) )')
+  .eq('player_id', player.id);
+
+const uniqueClubs = Array.from(
+  new Map(
+    (clubsPlayed ?? [])
+      .map(r => {
+        const t = r.tournaments as { clubs: { name: string; slug: string } | null } | null;
+        return t?.clubs ? [t.clubs.slug, t.clubs] : null;
+      })
+      .filter(Boolean) as [string, { name: string; slug: string }][]
+  ).values()
+);
+
+const country  = player.countries as { name: string; code: string; flag_emoji: string } | null;
+const tier     = getEloCategory(player.elo_rating ?? 1200);
+const eloData  = eloHistory ?? [];
+
+// Mejor posición global
+const bestPos = results?.reduce((best, r) => {
+  return r.position < best ? r.position : best;
+}, Infinity) ?? 0;
+
+// Promedio de posición
+const avgPos = results && results.length > 0
+  ? Math.round(results.reduce((sum, r) => sum + r.position, 0) / results.length)
+  : 0;
+
+// Puntos ELO ganados/perdidos total
+const totalEloGain = eloData.reduce((sum, e) => sum + (e.elo_change ?? 0), 0);
+
+function posClass(pos: number) {
+  if (pos === 1) return 'pos-first';
+  if (pos === 2) return 'pos-second';
+  if (pos === 3) return 'pos-third';
+  return '';
+}
+
+function eloChangeClass(change: number) {
+  if (change > 0) return 'elo-up';
+  if (change < 0) return 'elo-down';
+  return 'elo-same';
+}
+
+function eloChangeText(change: number) {
+  if (change > 0) return `+${change.toFixed(1)}`;
+  if (change < 0) return `${change.toFixed(1)}`;
+  return '—';
+}
+---
+
+<PublicLayout
+  title={player.nickname}
+  description={`Perfil de ${player.nickname} en Sharkania. ELO: ${player.elo_rating} · ${player.total_tournaments} torneos · ${player.total_podiums} podios.`}
+  ogType="profile"
+  ogTitle={player.nickname}
+>
+
+<!-- ── PLAYER HEADER ──────────────────────── -->
+<section class="player-hero">
+  <div class="section-wrap">
+    <div class="player-header crystal crystal-heavy">
+
+      <div class="player-header-left">
+        <div class="player-avatar">
+          <span class="player-avatar-letter">
+            {player.nickname.charAt(0).toUpperCase()}
+          </span>
+          <div class="player-avatar-ring"></div>
+        </div>
+
+        <div class="player-identity">
+          <div class="player-meta-top">
+            {country && (
+              <span class="player-flag-country">
+                {country.flag_emoji} {country.name}
+              </span>
+            )}
+            <span class={`tier ${
+              player.elo_rating >= 1800 ? 'tier-legend'  :
+              player.elo_rating >= 1600 ? 'tier-master'  :
+              player.elo_rating >= 1400 ? 'tier-diamond' :
+              player.elo_rating >= 1300 ? 'tier-gold'    :
+              player.elo_rating >= 1200 ? 'tier-silver'  :
+              player.elo_rating >= 1100 ? 'tier-bronze'  : 'tier-entry'
+            }`}>
+              {tier.badge} {tier.label.toUpperCase()}
+            </span>
+          </div>
+          <h1 class="player-name">{player.nickname}</h1>
+          <p class="player-since">
+  Activo desde {player.first_seen ?? '—'} · Último torneo {player.last_seen ?? '—'}
+</p>
+        </div>
+      </div>
+
+      <div class="player-elo-display">
+        <div class="elo-big-label">ELO RATING</div>
+        <div class="elo-big-number">{player.elo_rating ?? 1200}</div>
+        <div class="elo-peak">PEAK {player.peak_elo ?? 1200}</div>
+        <div class={`elo-total-change ${totalEloGain >= 0 ? 'elo-up' : 'elo-down'}`}>
+          {totalEloGain >= 0 ? '+' : ''}{totalEloGain.toFixed(1)} TOTAL
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── STAT CARDS ─────────────────────────── -->
+<section class="stats-section">
+  <div class="section-wrap">
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-icon">T</div>
+        <span class="stat-card-n">{player.total_tournaments ?? 0}</span>
+        <span class="stat-card-l">TORNEOS</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">1</div>
+        <span class="stat-card-n">{player.total_first_places ?? 0}</span>
+        <span class="stat-card-l">VICTORIAS</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">P</div>
+        <span class="stat-card-n">{player.total_podiums ?? 0}</span>
+        <span class="stat-card-l">PODIOS TOP 3</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">F</div>
+        <span class="stat-card-n">{player.total_final_tables ?? 0}</span>
+        <span class="stat-card-l">MESAS FINALES</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">#</div>
+        <span class="stat-card-n">{bestPos === Infinity ? '—' : bestPos}</span>
+        <span class="stat-card-l">MEJOR PUESTO</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">~</div>
+        <span class="stat-card-n">{avgPos || '—'}</span>
+        <span class="stat-card-l">POSICIÓN MEDIA</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── ELO CHART ──────────────────────────── -->
+{eloData.length > 1 && (
+  <section class="chart-section">
+    <div class="section-wrap">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow">EVOLUCIÓN</div>
+          <div class="section-title">HISTORIAL ELO</div>
+        </div>
+      </div>
+      <div class="chart-crystal crystal">
+        <canvas id="elo-chart" height="280"></canvas>
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- ── CLUBS ─────────────────────────────── -->
+{uniqueClubs.length > 0 && (
+  <section class="clubs-section">
+    <div class="section-wrap">
+      <div class="section-eyebrow" style="margin-bottom:1rem;">CLUBES DONDE HA JUGADO</div>
+      <div class="clubs-row">
+        {uniqueClubs.map(club => (
+          <a href={`/club/${club.slug}`} class="club-chip">{club.name}</a>
+        ))}
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- ── TOURNAMENT HISTORY ─────────────────── -->
+<section class="history-section">
+  <div class="section-wrap">
+    <div class="section-head">
+      <div>
+        <div class="section-eyebrow">RESULTADOS</div>
+        <div class="section-title">HISTORIAL DE TORNEOS</div>
+      </div>
+    </div>
+
+    <div class="table-crystal">
+      <div class="h-head">
+        <span>FECHA</span>
+        <span>TORNEO</span>
+        <span>CLUB</span>
+        <span class="col-lg">LIGA</span>
+        <span>POS</span>
+        <span class="col-st">CAMPO</span>
+        <span>ELO</span>
+      </div>
+
+      <div class="t-body">
+        {results?.map(r => {
+          const t       = r.tournaments as any;
+          const club    = t?.clubs   as { name: string; slug: string } | null;
+          const league  = t?.leagues as { name: string } | null;
+          const change  = r.elo_change ?? 0;
+          return (
+            <a href={`/torneo/${t?.id}`} class="h-row">
+              <div class="h-date">{t?.date ?? '—'}</div>
+              <div class="h-name">{t?.name ?? '—'}</div>
+              <div class="h-club">{club?.name ?? '—'}</div>
+              <div class="col-lg h-league">{league ? <span class="league-pill">{league.name}</span> : '—'}</div>
+              <div>
+                <span class={`pos-badge ${posClass(r.position)}`}>
+                  {r.position === 1 ? '1ST' : r.position === 2 ? '2ND' : r.position === 3 ? '3RD' : `${r.position}TH`}
+                </span>
+              </div>
+              <div class="col-st h-field">{t?.total_players ?? '—'} jug.</div>
+              <div>
+                <span class={eloChangeClass(change)}>
+                  {eloChangeText(change)}
+                </span>
+              </div>
+            </a>
+          );
+        })}
+        {(!results || results.length === 0) && (
+          <div class="t-empty">SIN HISTORIAL DE TORNEOS</div>
+        )}
+      </div>
+    </div>
+  </div>
+</section>
+
+</PublicLayout>
+
+<!-- Chart.js cargado síncronamente -->
+<script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<script define:vars={{ eloData }}>
+function initEloChart() {
+  const canvas = document.getElementById('elo-chart');
+  if (!canvas || !eloData || eloData.length < 2) return;
+  if (typeof Chart === 'undefined') { setTimeout(initEloChart, 50); return; }
+
+  const labels = eloData.map(e => {
+    const d = new Date(e.date + 'T12:00:00');
+    return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' }).toUpperCase();
+  });
+  const values = eloData.map(e => e.elo_after);
+  const minVal = Math.min(...values) - 30;
+  const maxVal = Math.max(...values) + 30;
+
+  const ctx  = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 280);
+  grad.addColorStop(0,   'rgba(0,229,255,0.28)');
+  grad.addColorStop(0.6, 'rgba(41,121,255,0.08)');
+  grad.addColorStop(1,   'rgba(41,121,255,0.00)');
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data:                 values,
+        borderColor:          '#00e5ff',
+        borderWidth:          2.5,
+        backgroundColor:      grad,
+        pointBackgroundColor: '#00e5ff',
+        pointBorderColor:     'rgba(2,11,30,0.8)',
+        pointBorderWidth:     2,
+        pointRadius:          eloData.length > 30 ? 2 : 5,
+        pointHoverRadius:     8,
+        tension:              0.35,
+        fill:                 true,
+      }]
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      animation:           { duration: 800, easing: 'easeInOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(2,11,30,0.95)',
+          borderColor:     'rgba(0,229,255,0.3)',
+          borderWidth:     1,
+          titleFont:       { family: 'Barlow Condensed', size: 11, weight: '700' },
+          bodyFont:        { family: 'JetBrains Mono', size: 14, weight: '700' },
+          titleColor:      'rgba(0,229,255,0.8)',
+          bodyColor:       '#fff',
+          padding:         12,
+          callbacks: {
+            title: (items) => items[0].label,
+            label: (item)  => ` ELO: ${item.raw}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid:  { color: 'rgba(255,255,255,0.04)', drawBorder: false },
+          ticks: {
+            color:         'rgba(255,255,255,0.35)',
+            font:          { family: 'Barlow Condensed', size: 10 },
+            maxTicksLimit: 10,
+            maxRotation:   0,
+          }
+        },
+        y: {
+          min:   minVal,
+          max:   maxVal,
+          grid:  { color: 'rgba(255,255,255,0.04)', drawBorder: false },
+          ticks: {
+            color: 'rgba(255,255,255,0.35)',
+            font:  { family: 'JetBrains Mono', size: 10 },
+          }
+        }
+      }
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initEloChart);
+</script>
+
+<style>
+/* ── Player hero ──────────────────────────── */
+.player-hero { padding: 3rem 0 0; }
+
+.player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2rem 2.5rem;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.player-header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+}
+
+/* Avatar */
+.player-avatar {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.player-avatar-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(41,121,255,0.3), rgba(0,229,255,0.2));
+  border: 2px solid rgba(0,229,255,0.3);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0,229,255,0.5);
+  box-shadow: 0 0 30px rgba(41,121,255,0.25), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+.player-avatar-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,229,255,0.2);
+}
+
+/* Identity */
+.player-identity { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.player-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.player-flag-country {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.player-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  line-height: 0.9;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 20px rgba(41,121,255,0.35));
+  text-transform: uppercase;
+}
+
+.player-since {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+}
+
+/* ELO display */
+.player-elo-display {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.elo-big-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  text-shadow: 0 0 10px rgba(0,229,255,0.4);
+  margin-bottom: 0.25rem;
+}
+
+.elo-big-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 700;
+  line-height: 1;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px rgba(41,121,255,0.5));
+}
+
+.elo-peak {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  margin-top: 0.3rem;
+}
+
+.elo-total-change {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
+/* ── Stats grid ───────────────────────────── */
+.stats-section { padding: 2rem 0; }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  position: relative;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 10px;
+  padding: 1.4rem 1rem 1.2rem;
+  text-align: center;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.22);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.4), 0 0 24px rgba(41,121,255,0.1), inset 0 1px 0 rgba(255,255,255,0.28);
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8%; right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+}
+
+.stat-card-icon {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--accent2);
+  opacity: 0.5;
+  margin-bottom: 0.5rem;
+}
+
+.stat-card-n {
+  display: block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 0.35rem;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.88) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 10px rgba(41,121,255,0.3));
+}
+
+.stat-card-l {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  opacity: 0.7;
+}
+
+/* ── Chart ───────────────────────────────── */
+.chart-section { padding: 1rem 0 2rem; }
+
+.chart-crystal {
+  padding: 1.5rem;
+  height: 320px;
+}
+
+/* ── Clubs ───────────────────────────────── */
+.clubs-section { padding: 0 0 2rem; }
+
+.clubs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.club-chip {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  text-decoration: none;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 7px 14px;
+  border-radius: 50px;
+  transition: all 0.2s;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+.club-chip:hover {
+  color: var(--accent2);
+  border-color: rgba(0,229,255,0.3);
+  background: rgba(0,229,255,0.08);
+}
+
+/* ── History table ───────────────────────── */
+.history-section { padding: 0 0 5rem; }
+
+.h-head {
+  display: grid;
+  grid-template-columns: 100px 1fr 160px 120px 80px 80px 80px;
+  padding: 1rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.h-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.4);
+}
+
+.h-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 160px 120px 80px 80px 80px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 60px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.h-row:hover { background: rgba(255,255,255,0.04); }
+
+.h-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s;
+}
+
+.h-row:hover::before { height: 60%; }
+
+.h-date  { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-faint); }
+.h-name  { font-family: 'Barlow Condensed', sans-serif; font-size: 0.92rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.h-row:hover .h-name { color: var(--accent2); }
+.h-club  { font-family: 'Barlow Condensed', sans-serif; font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-field { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-faint); }
+
+.league-pill {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  background: rgba(41,121,255,0.1);
+  border: 1px solid rgba(41,121,255,0.25);
+  border-radius: 20px;
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+/* Position badges */
+.pos-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.pos-first  { color: #f7e08a; border-color: rgba(247,224,138,0.4); background: rgba(232,197,90,0.12); box-shadow: 0 0 10px rgba(232,197,90,0.2); }
+.pos-second { color: #d0e8f5; border-color: rgba(208,232,245,0.3); background: rgba(180,210,240,0.08); }
+.pos-third  { color: #e0aa7a; border-color: rgba(224,170,122,0.3); background: rgba(200,140,90,0.08); }
+.pos-badge:not(.pos-first):not(.pos-second):not(.pos-third) {
+  color: var(--text-faint);
+  border-color: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+}
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 1024px) {
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .player-header { padding: 1.5rem; }
+  .player-header-left { gap: 1.25rem; }
+  .player-avatar-letter { width: 70px; height: 70px; font-size: 2rem; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .h-head, .h-row { grid-template-columns: 90px 1fr 70px 70px; }
+  .col-lg, .col-st { display: none; }
+}
+
+@media (max-width: 480px) {
+  .player-header { flex-direction: column; align-items: flex-start; }
+  .player-elo-display { text-align: left; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+/* ── Fixes visibilidad jugador ─── */
+.player-since {
+  color: rgba(255,255,255,0.55);
+}
+.player-flag-country {
+  color: rgba(255,255,255,0.65);
+}
+.elo-peak {
+  color: rgba(255,255,255,0.55);
+}
+.h-head span {
+  color: rgba(0,229,255,0.85);
+}
+.h-date {
+  color: rgba(255,255,255,0.55);
+}
+.h-club {
+  color: rgba(255,255,255,0.6);
+}
+.h-field {
+  color: rgba(255,255,255,0.5);
+}
+.pos-badge:not(.pos-first):not(.pos-second):not(.pos-third) {
+  color: rgba(255,255,255,0.55);
+  border-color: rgba(255,255,255,0.15);
+}
+
+</style>
+</PublicLayout>

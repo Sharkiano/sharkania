@@ -1,0 +1,230 @@
+---
+// src/pages/club-admin/torneos/[id].astro
+import ClubAdminLayout from '@layouts/ClubAdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const adminProfile = Astro.locals.adminProfile;
+if (!adminProfile?.club_id) return Astro.redirect('/club-admin/login');
+
+const { id } = Astro.params;
+if (!id || isNaN(Number(id))) return Astro.redirect('/club-admin/torneos');
+
+const supabase = createServerClient();
+
+const { data: club } = await supabase
+  .from('clubs')
+  .select('name')
+  .eq('id', adminProfile.club_id)
+  .single();
+
+const { data: tournament } = await supabase
+  .from('tournaments')
+  .select(`
+    *,
+    leagues ( name ),
+    rooms   ( name )
+  `)
+  .eq('id', Number(id))
+  .eq('club_id', adminProfile.club_id)
+  .single();
+
+if (!tournament) return Astro.redirect('/club-admin/torneos');
+
+const { data: results } = await supabase
+  .from('tournament_results')
+  .select(`
+    position, prize, currency, reentries, bounties, elo_change, league_points,
+    players ( nickname, slug, elo_rating, countries ( flag_emoji ) )
+  `)
+  .eq('tournament_id', Number(id))
+  .order('position');
+
+const league = tournament.leagues as { name: string } | null;
+const room   = tournament.rooms   as { name: string } | null;
+---
+
+<ClubAdminLayout title={tournament.name} clubName={club?.name ?? 'Mi Club'}>
+
+  <div class="page-header">
+    <a href="/club-admin/torneos" class="btn btn-secondary">← Volver</a>
+    <span class={`status-badge ${tournament.is_verified ? 'status-verified' : 'status-pending'}`}>
+      {tournament.is_verified ? '✓ Verificado' : '⏳ Pendiente verificación'}
+    </span>
+  </div>
+
+  <!-- ── Info del torneo ────────────────────────────────── -->
+  <div class="glass-card tournament-info-card">
+    <div class="tournament-info-grid">
+      <div class="info-item">
+        <span class="info-label">Fecha</span>
+        <span class="info-value text-mono">{tournament.date}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Sala</span>
+        <span class="info-value">{room?.name ?? '—'}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Liga</span>
+        <span class="info-value">
+          {league ? <span class="league-tag">{league.name}</span> : '—'}
+        </span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Jugadores</span>
+        <span class="info-value text-mono">{tournament.total_players}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Buy-in</span>
+        <span class="info-value text-mono">
+          {tournament.buy_in ? `${tournament.buy_in} ${tournament.currency}` : '—'}
+        </span>
+      </div>
+      {tournament.notes && (
+        <div class="info-item info-item--full">
+          <span class="info-label">Notas</span>
+          <span class="info-value text-secondary">{tournament.notes}</span>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <!-- ── Resultados ─────────────────────────────────────── -->
+  <div class="glass-card table-card">
+    <div class="card-header">
+      <h3 class="card-title">📊 Resultados ({results?.length ?? 0} jugadores)</h3>
+    </div>
+    {results && results.length > 0 ? (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Jugador</th>
+            <th>Premio</th>
+            <th>Re-entries</th>
+            <th>Bounties</th>
+            <th>Pts Liga</th>
+            <th>ELO</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map(r => {
+            const player  = r.players  as { nickname: string; slug: string; elo_rating: number; countries: { flag_emoji: string } | null } | null;
+            const country = player?.countries as { flag_emoji: string } | null;
+            return (
+              <tr>
+                <td>
+                  <span class={`pos-badge ${r.position === 1 ? 'pos-1' : r.position === 2 ? 'pos-2' : r.position === 3 ? 'pos-3' : 'pos-default'}`}>
+                    {r.position === 1 ? '🥇' : r.position === 2 ? '🥈' : r.position === 3 ? '🥉' : `#${r.position}`}
+                  </span>
+                </td>
+                <td>
+                  <div class="player-cell">
+                    <span class="player-flag">{country?.flag_emoji ?? '🌎'}</span>
+                    <a href={`/jugador/${player?.slug}`} class="player-nick" target="_blank">
+                      {player?.nickname ?? '—'}
+                    </a>
+                  </div>
+                </td>
+                <td class="text-mono text-secondary">
+                  {r.prize ? `${r.prize} ${r.currency}` : '—'}
+                </td>
+                <td class="text-mono text-secondary">{r.reentries || '—'}</td>
+                <td class="text-mono text-secondary">{r.bounties  || '—'}</td>
+                <td class="text-mono">
+                  {r.league_points
+                    ? <span style="color:#6c5ce7;">{r.league_points}</span>
+                    : <span class="text-muted">—</span>
+                  }
+                </td>
+                <td class="text-mono">
+                  {Number(r.elo_change) !== 0
+                    ? <span style={`color:${Number(r.elo_change) > 0 ? '#00e676' : '#ff5252'}`}>
+                        {Number(r.elo_change) > 0 ? '+' : ''}{r.elo_change}
+                      </span>
+                    : <span class="text-muted">—</span>
+                  }
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    ) : (
+      <div class="empty-state" style="padding:2rem;">No hay resultados cargados.</div>
+    )}
+  </div>
+
+</ClubAdminLayout>
+
+<style is:global>
+/* ── Tournament info card ────────────────────── */
+.tournament-info-card { padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; }
+
+.tournament-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.info-item--full { grid-column: 1 / -1; }
+
+.info-label {
+  font-size: 0.75rem;
+  color: #55556a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.info-value {
+  font-size: 0.9rem;
+  color: #e4e4ef;
+  font-weight: 500;
+}
+
+/* ── Position badges ─────────────────────────── */
+.pos-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.pos-1       { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.pos-2       { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.pos-3       { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.pos-default { background: rgba(255,255,255,0.05); color: #8888a4; }
+
+/* ── Player cell ─────────────────────────────── */
+.player-cell  { display: flex; align-items: center; gap: 0.5rem; }
+.player-flag  { font-size: 1rem; }
+.player-nick  { font-weight: 500; color: #e4e4ef; text-decoration: none; transition: color 0.2s; }
+.player-nick:hover { color: #6c5ce7; }
+
+/* ── Card header ─────────────────────────────── */
+.card-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid rgba(108,92,231,0.1); }
+.card-title  { font-size: 0.95rem; font-weight: 600; color: #e4e4ef; margin: 0; }
+
+/* ── Misc ────────────────────────────────────── */
+.page-header    { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem; }
+.table-card     { padding: 0; overflow: hidden; overflow-x: auto; }
+.league-tag     { display: inline-flex; align-items: center; padding: 2px 8px; background: rgba(108,92,231,0.1); border: 1px solid rgba(108,92,231,0.2); border-radius: 20px; font-size: 0.75rem; color: #6c5ce7; font-weight: 500; }
+.status-badge   { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified { background: rgba(0,230,118,0.1); color: #00e676; border: 1px solid rgba(0,230,118,0.2); }
+.status-pending  { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.2); }
+.text-secondary  { color: #8888a4; }
+.text-muted      { color: #55556a; }
+.text-mono       { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.empty-state     { text-align: center; color: #55556a; font-size: 0.875rem; }
+</style>

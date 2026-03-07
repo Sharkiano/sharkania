@@ -1,0 +1,607 @@
+---
+// src/pages/admin/configuracion.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase     = createServerClient();
+const adminProfile = Astro.locals.adminProfile;
+
+if (!adminProfile || adminProfile.role !== 'super_admin') {
+  return Astro.redirect('/admin/login');
+}
+
+// ── Leer configuración guardada (si existe) ──
+// Usamos una tabla simple de key-value o un registro fijo
+// Si no existe la tabla, usamos valores por defecto del algoritmo
+const ELO_DEFAULTS = {
+  initial_rating:      1200,
+  min_rating:          800,
+  k_factor_new:        60,   // < 30 torneos
+  k_factor_standard:   32,   // 30-100 torneos
+  k_factor_veteran:    20,   // > 100 torneos
+  provisional_games:   30,
+  veteran_games:       100,
+  decay_days:          60,   // días sin jugar antes de decay
+  decay_monthly_pct:   2,    // % mensual de decay hacia 1200
+  decay_max_months:    6,    // máximo meses de decay
+  league_multiplier:   1.2,  // bonus por torneo de liga
+};
+
+// Intentar leer config guardada desde Supabase
+// (asumimos que puede existir una tabla app_config o similar)
+// Si no, usamos defaults
+let config = { ...ELO_DEFAULTS };
+
+// Estadísticas del sistema ELO actual
+const [
+  { data: eloStats },
+  { count: totalWithElo },
+] = await Promise.all([
+  supabase
+    .from('players')
+    .select('elo_rating, peak_elo')
+    .eq('is_active', true)
+    .gt('total_tournaments', 0)
+    .order('elo_rating', { ascending: false })
+    .limit(1000),
+  supabase
+    .from('players')
+    .select('*', { count: 'exact', head: true })
+    .gt('total_tournaments', 0),
+]);
+
+// Distribución por tier
+const tiers = {
+  legend:  0,
+  master:  0,
+  diamond: 0,
+  gold:    0,
+  silver:  0,
+  bronze:  0,
+  entry:   0,
+};
+
+(eloStats ?? []).forEach(p => {
+  const elo = p.elo_rating ?? 1200;
+  if      (elo >= 1800) tiers.legend++;
+  else if (elo >= 1600) tiers.master++;
+  else if (elo >= 1400) tiers.diamond++;
+  else if (elo >= 1300) tiers.gold++;
+  else if (elo >= 1200) tiers.silver++;
+  else if (elo >= 1100) tiers.bronze++;
+  else                  tiers.entry++;
+});
+
+const total = totalWithElo ?? 1;
+const avgElo = eloStats && eloStats.length > 0
+  ? Math.round(eloStats.reduce((s, p) => s + (p.elo_rating ?? 1200), 0) / eloStats.length)
+  : 1200;
+const maxElo = eloStats?.[0]?.elo_rating ?? 1200;
+---
+
+<AdminLayout title="Configuración ELO">
+
+  <div class="dashboard-welcome">
+    <div>
+      <h2 class="welcome-title">⚙️ Configuración ELO</h2>
+      <p class="welcome-sub">Parámetros del sistema de ranking. Solo lectura — editar requiere modificar el código fuente.</p>
+    </div>
+  </div>
+
+  <!-- ── Stats del sistema actual ──────────────────────── -->
+  <div class="elo-stats-grid">
+    <div class="elo-stat-card">
+      <div class="esc-label">JUGADORES RANKEADOS</div>
+      <div class="esc-value">{total}</div>
+    </div>
+    <div class="elo-stat-card">
+      <div class="esc-label">ELO PROMEDIO</div>
+      <div class="esc-value">{avgElo}</div>
+    </div>
+    <div class="elo-stat-card">
+      <div class="esc-label">ELO MÁXIMO</div>
+      <div class="esc-value esc-gold">{maxElo}</div>
+    </div>
+    <div class="elo-stat-card">
+      <div class="esc-label">RATING INICIAL</div>
+      <div class="esc-value">{config.initial_rating}</div>
+    </div>
+  </div>
+
+  <!-- ── Grid principal ─────────────────────────────── -->
+  <div class="config-grid">
+
+    <!-- Distribución por tier -->
+    <div class="glass-card config-card">
+      <div class="card-header">
+        <h3 class="card-title">📊 Distribución actual por Tier</h3>
+      </div>
+      <div class="card-body">
+        <div class="tier-dist">
+
+          <div class="tier-row">
+            <span class="tier tier-legend">LEGEND</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--legend" style={`width:${Math.round((tiers.legend/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.legend}</span>
+            <span class="tier-pct">{Math.round((tiers.legend/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-master">MASTER</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--master" style={`width:${Math.round((tiers.master/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.master}</span>
+            <span class="tier-pct">{Math.round((tiers.master/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-diamond">DIAMOND</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--diamond" style={`width:${Math.round((tiers.diamond/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.diamond}</span>
+            <span class="tier-pct">{Math.round((tiers.diamond/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-gold">GOLD</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--gold" style={`width:${Math.round((tiers.gold/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.gold}</span>
+            <span class="tier-pct">{Math.round((tiers.gold/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-silver">SILVER</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--silver" style={`width:${Math.round((tiers.silver/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.silver}</span>
+            <span class="tier-pct">{Math.round((tiers.silver/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-bronze">BRONZE</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--bronze" style={`width:${Math.round((tiers.bronze/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.bronze}</span>
+            <span class="tier-pct">{Math.round((tiers.bronze/total)*100)}%</span>
+          </div>
+
+          <div class="tier-row">
+            <span class="tier tier-entry">ENTRY</span>
+            <div class="tier-bar-wrap">
+              <div class="tier-bar tier-bar--entry" style={`width:${Math.round((tiers.entry/total)*100)}%`}></div>
+            </div>
+            <span class="tier-count">{tiers.entry}</span>
+            <span class="tier-pct">{Math.round((tiers.entry/total)*100)}%</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Parámetros K Factor -->
+    <div class="glass-card config-card">
+      <div class="card-header">
+        <h3 class="card-title">🎯 Factor K (Volatilidad)</h3>
+      </div>
+      <div class="card-body">
+        <p class="param-desc">
+          El Factor K determina cuánto cambia el ELO por torneo.
+          Valores altos = más volátil. Se reduce a medida que el jugador gana experiencia.
+        </p>
+        <div class="params-list">
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">K Inicial</span>
+              <span class="param-note">Jugadores con menos de {config.provisional_games} torneos</span>
+            </div>
+            <span class="param-value param-high">{config.k_factor_new}</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">K Estándar</span>
+              <span class="param-note">{config.provisional_games}–{config.veteran_games} torneos</span>
+            </div>
+            <span class="param-value param-mid">{config.k_factor_standard}</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">K Veterano</span>
+              <span class="param-note">Más de {config.veteran_games} torneos</span>
+            </div>
+            <span class="param-value param-low">{config.k_factor_veteran}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Parámetros de rating -->
+    <div class="glass-card config-card">
+      <div class="card-header">
+        <h3 class="card-title">📈 Parámetros de Rating</h3>
+      </div>
+      <div class="card-body">
+        <div class="params-list">
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Rating inicial</span>
+              <span class="param-note">ELO con el que empieza todo jugador nuevo</span>
+            </div>
+            <span class="param-value">{config.initial_rating}</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Rating mínimo</span>
+              <span class="param-note">Piso absoluto — nunca baja de este valor</span>
+            </div>
+            <span class="param-value">{config.min_rating}</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Multiplicador de liga</span>
+              <span class="param-note">Bonus aplicado a torneos pertenecientes a una liga</span>
+            </div>
+            <span class="param-value param-mid">×{config.league_multiplier}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decay por inactividad -->
+    <div class="glass-card config-card">
+      <div class="card-header">
+        <h3 class="card-title">⏳ Decay por Inactividad</h3>
+        <span class="badge-soon">Pendiente activar</span>
+      </div>
+      <div class="card-body">
+        <p class="param-desc">
+          Reduce gradualmente el ELO de jugadores inactivos para
+          mantener el ranking relevante y actualizado.
+        </p>
+        <div class="params-list">
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Días para activar decay</span>
+              <span class="param-note">Sin torneos antes de empezar a perder ELO</span>
+            </div>
+            <span class="param-value">{config.decay_days} días</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Decay mensual</span>
+              <span class="param-note">% del delta hacia 1200 que se pierde por mes</span>
+            </div>
+            <span class="param-value param-low">{config.decay_monthly_pct}%</span>
+          </div>
+          <div class="param-item">
+            <div class="param-left">
+              <span class="param-name">Máximo de decay</span>
+              <span class="param-note">Meses máximos que se acumula el decay</span>
+            </div>
+            <span class="param-value">{config.decay_max_months} meses</span>
+          </div>
+        </div>
+        <div class="decay-info">
+          ℹ️ El decay se aplica automáticamente via un cron job mensual.
+          Para activarlo, configura un Supabase Scheduled Function o pg_cron.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Rangos de tiers ─────────────────────────────── -->
+  <div class="glass-card" style="margin-top:0;">
+    <div class="card-header">
+      <h3 class="card-title">🏅 Rangos de Tiers ELO</h3>
+    </div>
+    <div class="card-body">
+      <div class="tiers-table">
+        <div class="tt-head">
+          <span>TIER</span>
+          <span>RANGO ELO</span>
+          <span>DESCRIPCIÓN</span>
+          <span>JUGADORES</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-legend">🏆 LEGEND</span>
+          <span class="tt-elo">&gt; 1800</span>
+          <span class="tt-desc">Elite absoluta del póker hispano</span>
+          <span class="tt-n">{tiers.legend}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-master">⭐ MASTER</span>
+          <span class="tt-elo">1600 – 1800</span>
+          <span class="tt-desc">Jugadores de alto nivel consistente</span>
+          <span class="tt-n">{tiers.master}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-diamond">🔷 DIAMOND</span>
+          <span class="tt-elo">1400 – 1600</span>
+          <span class="tt-desc">Por encima del promedio</span>
+          <span class="tt-n">{tiers.diamond}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-gold">🥇 GOLD</span>
+          <span class="tt-elo">1300 – 1400</span>
+          <span class="tt-desc">Jugador sólido</span>
+          <span class="tt-n">{tiers.gold}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-silver">🥈 SILVER</span>
+          <span class="tt-elo">1200 – 1300</span>
+          <span class="tt-desc">Nivel promedio</span>
+          <span class="tt-n">{tiers.silver}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-bronze">🥉 BRONZE</span>
+          <span class="tt-elo">1100 – 1200</span>
+          <span class="tt-desc">Por debajo del promedio</span>
+          <span class="tt-n">{tiers.bronze}</span>
+        </div>
+        <div class="tt-row">
+          <span class="tier tier-entry">📍 ENTRY</span>
+          <span class="tt-elo">&lt; 1100</span>
+          <span class="tt-desc">Jugadores nuevos o con malos resultados</span>
+          <span class="tt-n">{tiers.entry}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style is:global>
+/* ── ELO Stats top ───────────────────────────── */
+.elo-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .elo-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.elo-stat-card {
+  background: #12121a;
+  border: 1px solid rgba(108,92,231,0.12);
+  border-radius: 12px;
+  padding: 1.25rem;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.elo-stat-card:hover { border-color: rgba(108,92,231,0.3); }
+
+.esc-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #8888a4;
+  margin-bottom: 0.5rem;
+}
+
+.esc-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  line-height: 1;
+}
+
+.esc-gold {
+  background: linear-gradient(135deg, #f5af19, #f12711);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Config grid ─────────────────────────────── */
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 900px) {
+  .config-grid { grid-template-columns: 1fr; }
+}
+
+.config-card { overflow: hidden; }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(108,92,231,0.1);
+}
+
+.card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e4e4ef;
+  margin: 0;
+}
+
+.badge-soon {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #ffd740;
+  background: rgba(255,215,64,0.08);
+  border: 1px solid rgba(255,215,64,0.2);
+  padding: 3px 10px;
+  border-radius: 50px;
+}
+
+.card-body { padding: 1.25rem; }
+
+/* ── Tier distribution ───────────────────────── */
+.tier-dist { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.tier-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 36px 44px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tier-bar-wrap {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.tier-bar {
+  height: 100%;
+  border-radius: 99px;
+  min-width: 2px;
+  transition: width 0.6s ease;
+}
+
+.tier-bar--legend  { background: linear-gradient(90deg, #f5af19, #f7e08a); box-shadow: 0 0 8px rgba(245,175,25,0.4); }
+.tier-bar--master  { background: linear-gradient(90deg, #6c5ce7, #c4b5fd); }
+.tier-bar--diamond { background: linear-gradient(90deg, #448aff, #7dd3fc); }
+.tier-bar--gold    { background: linear-gradient(90deg, #fcd34d, #f5af19); }
+.tier-bar--silver  { background: linear-gradient(90deg, #94a3b8, #cbd5e1); }
+.tier-bar--bronze  { background: linear-gradient(90deg, #a16207, #d4a574); }
+.tier-bar--entry   { background: rgba(255,255,255,0.15); }
+
+.tier-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: #e4e4ef;
+  text-align: right;
+}
+
+.tier-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #8888a4;
+  text-align: right;
+}
+
+/* ── Params list ─────────────────────────────── */
+.param-desc {
+  font-size: 0.8rem;
+  color: #8888a4;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.params-list { display: flex; flex-direction: column; gap: 0; }
+
+.param-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  gap: 1rem;
+}
+
+.param-item:last-child { border-bottom: none; }
+
+.param-left { display: flex; flex-direction: column; gap: 2px; }
+
+.param-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #e4e4ef;
+}
+
+.param-note {
+  font-size: 0.75rem;
+  color: #55556a;
+}
+
+.param-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  flex-shrink: 0;
+  min-width: 60px;
+  text-align: right;
+}
+
+.param-high { color: #ff5252; }
+.param-mid  { color: #ffd740; }
+.param-low  { color: #00e676; }
+
+.decay-info {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0,206,201,0.06);
+  border: 1px solid rgba(0,206,201,0.15);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: #8888a4;
+  line-height: 1.6;
+}
+
+/* ── Tiers table ─────────────────────────────── */
+.tiers-table { display: flex; flex-direction: column; }
+
+.tt-head {
+  display: grid;
+  grid-template-columns: 120px 140px 1fr 80px;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(108,92,231,0.12);
+  margin-bottom: 0.25rem;
+}
+
+.tt-head span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #55556a;
+}
+
+.tt-row {
+  display: grid;
+  grid-template-columns: 120px 140px 1fr 80px;
+  align-items: center;
+  padding: 0.625rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  gap: 1rem;
+}
+
+.tt-row:last-child { border-bottom: none; }
+
+.tt-elo {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: #8888a4;
+}
+
+.tt-desc {
+  font-size: 0.82rem;
+  color: #55556a;
+}
+
+.tt-n {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .tt-head, .tt-row { grid-template-columns: 100px 100px 1fr; }
+  .tt-n { display: none; }
+}
+</style>

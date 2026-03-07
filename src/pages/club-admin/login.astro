@@ -1,0 +1,192 @@
+---
+// src/pages/club-admin/login.astro
+---
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin de Club — Login | Sharkania</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/src/styles/global.css" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="login-body">
+
+  <div class="login-container">
+
+    <div class="login-logo">
+      <span style="font-size:2.5rem;">🦈</span>
+      <span class="login-logo-text">Sharkiana</span>
+    </div>
+
+    <div class="glass-card login-card">
+      <div class="login-header">
+        <h1 class="login-title">Admin de Club</h1>
+        <p class="login-subtitle">Ingresá para gestionar tus torneos</p>
+      </div>
+
+      <div class="login-error" id="login-error" role="alert" aria-live="polite"></div>
+
+      <div class="login-form">
+        <div class="form-group">
+          <label for="email" class="form-label">Email</label>
+          <input
+            type="email"
+            id="email"
+            class="input-field"
+            placeholder="tu@club.com"
+            autocomplete="email"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="password" class="form-label">Contraseña</label>
+          <div class="password-wrap">
+            <input
+              type="password"
+              id="password"
+              class="input-field"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            />
+            <button
+              type="button"
+              class="password-toggle"
+              id="password-toggle"
+              aria-label="Mostrar contraseña"
+            >👁</button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-primary login-btn"
+          id="login-btn"
+        >
+          Ingresar
+        </button>
+      </div>
+
+      <div class="login-footer-link">
+        <a href="/admin/login">¿Eres Super Admin? →</a>
+      </div>
+    </div>
+
+    <a href="/" class="back-link">← Volver al sitio</a>
+
+  </div>
+
+</body>
+</html>
+
+<style is:global>
+.login-body {
+  min-height: 100vh;
+  background: #0a0a0f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(108, 92, 231, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(0, 206, 201, 0.05) 0%, transparent 50%);
+}
+.login-container { width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 1.5rem; }
+.login-logo { display: flex; align-items: center; gap: 0.75rem; }
+.login-logo-text { font-size: 1.75rem; font-weight: 800; background: linear-gradient(135deg, #6c5ce7, #00cec9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.login-card { width: 100%; padding: 2rem; }
+.login-header { margin-bottom: 1.75rem; text-align: center; }
+.login-title { font-size: 1.4rem; font-weight: 700; color: #e4e4ef; margin: 0 0 0.35rem; }
+.login-subtitle { font-size: 0.875rem; color: #8888a4; margin: 0; }
+.login-error { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-bottom: 1.25rem; }
+.login-error.is-visible { display: block; }
+.login-form { display: flex; flex-direction: column; gap: 1.25rem; }
+.form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.form-label { font-size: 0.85rem; font-weight: 500; color: #8888a4; }
+.password-wrap { position: relative; }
+.password-wrap .input-field { padding-right: 42px; }
+.password-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1rem; padding: 4px; opacity: 0.5; transition: opacity 0.2s; }
+.password-toggle:hover { opacity: 1; }
+.login-btn { width: 100%; margin-top: 0.5rem; padding: 12px; font-size: 0.95rem; }
+.login-footer-link { margin-top: 1.25rem; text-align: center; font-size: 0.85rem; }
+.login-footer-link a { color: #8888a4; text-decoration: none; transition: color 0.2s; }
+.login-footer-link a:hover { color: #6c5ce7; }
+.back-link { font-size: 0.85rem; color: #55556a; text-decoration: none; transition: color 0.2s; }
+.back-link:hover { color: #8888a4; }
+</style>
+
+<script>
+const emailInput     = document.getElementById('email') as HTMLInputElement;
+const passwordInput  = document.getElementById('password') as HTMLInputElement;
+const loginBtn       = document.getElementById('login-btn') as HTMLButtonElement;
+const loginError     = document.getElementById('login-error') as HTMLDivElement;
+const passwordToggle = document.getElementById('password-toggle') as HTMLButtonElement;
+
+passwordToggle?.addEventListener('click', () => {
+  const isPassword = passwordInput.type === 'password';
+  passwordInput.type = isPassword ? 'text' : 'password';
+  passwordToggle.textContent = isPassword ? '🙈' : '👁';
+});
+
+passwordInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleLogin();
+});
+
+emailInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') passwordInput?.focus();
+});
+
+loginBtn?.addEventListener('click', handleLogin);
+
+async function handleLogin() {
+  const email    = emailInput?.value.trim() ?? '';
+  const password = passwordInput?.value ?? '';
+
+  loginError.classList.remove('is-visible');
+  loginError.textContent = '';
+
+  if (!email || !password) {
+    showError('Por favor completá email y contraseña.');
+    return;
+  }
+
+  loginBtn.disabled    = true;
+  loginBtn.textContent = 'Ingresando...';
+
+  try {
+    const formData = new FormData();
+    formData.append('email',    email);
+    formData.append('password', password);
+    formData.append('panel',    'club-admin');
+
+    const res  = await fetch('/api/auth/login', {
+      method: 'POST',
+      body:   formData,
+    });
+
+    const data = await res.json() as { error?: string; redirectTo?: string };
+
+    if (!res.ok || data.error) {
+      showError(data.error ?? 'Error al iniciar sesión.');
+      return;
+    }
+
+    window.location.href = data.redirectTo ?? '/club-admin';
+
+  } catch {
+    showError('Error de conexión. Intentá de nuevo.');
+  } finally {
+    loginBtn.disabled    = false;
+    loginBtn.textContent = 'Ingresar';
+  }
+}
+
+function showError(message: string) {
+  loginError.textContent = message;
+  loginError.classList.add('is-visible');
+}
+</script>

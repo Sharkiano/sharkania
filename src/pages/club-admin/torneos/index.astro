@@ -1,0 +1,236 @@
+---
+// src/pages/club-admin/torneos/index.astro
+import ClubAdminLayout from '@layouts/ClubAdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const adminProfile = Astro.locals.adminProfile;
+if (!adminProfile?.club_id) return Astro.redirect('/club-admin/login');
+
+const supabase = createServerClient();
+
+const { data: club } = await supabase
+  .from('clubs')
+  .select('name')
+  .eq('id', adminProfile.club_id)
+  .single();
+
+const { data: tournaments } = await supabase
+  .from('tournaments')
+  .select(`
+    id, name, date, total_players, buy_in, currency,
+    is_verified, notes, created_at,
+    leagues ( name ),
+    rooms   ( name )
+  `)
+  .eq('club_id', adminProfile.club_id)
+  .order('date', { ascending: false });
+
+const totalCount    = tournaments?.length                         ?? 0;
+const verifiedCount = tournaments?.filter(t => t.is_verified).length  ?? 0;
+const pendingCount  = tournaments?.filter(t => !t.is_verified).length ?? 0;
+---
+
+<ClubAdminLayout title="Mis Torneos" clubName={club?.name ?? 'Mi Club'}>
+
+  <div class="page-header">
+    <div>
+      <p class="page-meta">
+        <span class="meta-badge meta-active">{verifiedCount} verificados</span>
+        <span class="meta-badge meta-inactive">{pendingCount} pendientes</span>
+      </p>
+    </div>
+    <a href="/club-admin/subir-resultados" class="btn btn-primary">⬆️ Subir Resultados</a>
+  </div>
+
+  <div class="glass-card table-card">
+    {tournaments && tournaments.length > 0 && (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Torneo</th>
+            <th>Fecha</th>
+            <th>Sala</th>
+            <th>Liga</th>
+            <th>Jugadores</th>
+            <th>Buy-in</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+  {tournaments.map(t => {
+    const league = t.leagues as { name: string } | null;
+    const room   = t.rooms   as { name: string } | null;
+    return (
+      <tr>
+        <td>
+          <div class="tournament-name-cell">
+            <span class="tournament-name">{t.name}</span>
+            {t.notes && <span class="tournament-notes">{t.notes.slice(0, 40)}{t.notes.length > 40 ? '…' : ''}</span>}
+          </div>
+        </td>
+        <td class="text-mono text-secondary">{t.date}</td>
+        <td class="text-secondary">{room?.name ?? '—'}</td>
+        <td>{league ? <span class="league-tag">{league.name}</span> : '—'}</td>
+        <td class="text-mono">{t.total_players}</td>
+        <td class="text-mono text-secondary">{t.buy_in ? `${t.buy_in} ${t.currency}` : '—'}</td>
+        <td>
+          {t.is_verified
+            ? <span class="status-badge status-verified">✓ Verificado</span>
+            : <span class="status-badge status-pending">⏳ Pendiente</span>
+          }
+        </td>
+        <td>
+          <div class="action-btns">
+            <a href={`/club-admin/torneos/${t.id}`} class="action-btn action-btn--edit">👁</a>
+            {!t.is_verified && (
+              <button
+                class="action-btn action-btn--danger"
+                data-id={t.id}
+                data-name={t.name}
+                onclick="deleteTournament(this)"
+              >🗑</button>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
+      </table>
+    )}
+    {(!tournaments || tournaments.length === 0) && (
+      <div class="empty-state" style="padding:3rem;">
+        <p style="font-size:2rem;margin:0;">🏆</p>
+        <p>No hay torneos cargados aún.</p>
+        <a href="/club-admin/subir-resultados" class="btn btn-primary" style="margin-top:0.75rem;">
+          Subir primer torneo
+        </a>
+      </div>
+    )}
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+</ClubAdminLayout>
+
+<style is:global>
+/* ── Page header ─────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.page-meta {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.meta-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.meta-active   { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.meta-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+
+/* ── Table card ──────────────────────────────── */
+.table-card { padding: 0; overflow: hidden; overflow-x: auto; }
+
+/* ── Tournament cells ────────────────────────── */
+.tournament-name-cell { display: flex; flex-direction: column; gap: 2px; }
+.tournament-name  { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.tournament-notes { font-size: 0.75rem; color: #55556a; }
+.tournament-league { font-size: 0.75rem; color: #6c5ce7; }
+
+/* ── League tag ──────────────────────────────── */
+.league-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(108,92,231,0.1);
+  border: 1px solid rgba(108,92,231,0.2);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  color: #6c5ce7;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Status badges ───────────────────────────── */
+.status-badge    { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.status-pending  { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.2); }
+.status-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+
+/* ── Action buttons ──────────────────────────── */
+.action-btns { display: flex; gap: 0.5rem; }
+.action-btn { width: 32px; height: 32px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; text-decoration: none; }
+.action-btn--edit:hover    { background: rgba(108,92,231,0.25); }
+.action-btn--edit    { background: rgba(108,92,231,0.1); }
+.action-btn--danger  { background: rgba(255,82,82,0.1);  }
+.action-btn--danger:hover  { background: rgba(255,82,82,0.25);  }
+
+/* ── Misc ────────────────────────────────────── */
+.text-secondary { color: #8888a4; }
+.text-muted     { color: #55556a; }
+.text-mono      { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.empty-state    { padding: 2rem; text-align: center; color: #55556a; font-size: 0.875rem; }
+
+/* ── Toast ───────────────────────────────────── */
+.toast { position: fixed; bottom: 1.5rem; right: 1.5rem; padding: 12px 20px; border-radius: 10px; font-size: 0.875rem; font-weight: 500; z-index: 2000; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; pointer-events: none; }
+.toast.is-visible { opacity: 1; transform: translateY(0); }
+.toast--success { background: rgba(0,230,118,0.15); border: 1px solid rgba(0,230,118,0.3); color: #00e676; }
+.toast--error   { background: rgba(255,82,82,0.15);  border: 1px solid rgba(255,82,82,0.3);  color: #ff5252; }
+</style>
+
+<script>
+async function deleteTournament(btn: HTMLElement) {
+  const id   = Number(btn.dataset.id);
+  const name = btn.dataset.name ?? 'este torneo';
+
+  if (!confirm(`¿Eliminar "${name}"? Se eliminarán todos sus resultados. Esta acción no se puede deshacer.`)) return;
+
+  (btn as HTMLButtonElement).disabled = true;
+
+  try {
+    const res  = await fetch('/api/admin/torneos', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al eliminar.', 'error');
+      (btn as HTMLButtonElement).disabled = false;
+      return;
+    }
+
+    btn.closest('tr')?.remove();
+    showToast(`Torneo "${name}" eliminado.`, 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+(window as unknown as Record<string, unknown>).deleteTournament = deleteTournament;
+</script>

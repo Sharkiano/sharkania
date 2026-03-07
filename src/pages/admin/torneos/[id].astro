@@ -1,0 +1,1116 @@
+---
+// src/pages/admin/torneos/[id].astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { id } = Astro.params;
+const supabase = createServerClient();
+
+if (!id || isNaN(Number(id))) return Astro.redirect('/admin/torneos');
+
+const { data: tournament } = await supabase
+  .from('tournaments')
+  .select(`
+    *,
+    clubs   ( name, slug ),
+    leagues ( name, slug ),
+    rooms   ( name ),
+    admin_profiles ( name, email )
+  `)
+  .eq('id', Number(id))
+  .single();
+
+if (!tournament) return Astro.redirect('/admin/torneos');
+
+const { data: results } = await supabase
+  .from('tournament_results')
+  .select(`
+    id, position, prize, currency, elo_change, elo_before, elo_after,
+    reentries, bounties, league_points,
+    players ( id, nickname, slug, elo_rating, countries ( flag_emoji, name ) )
+  `)
+  .eq('tournament_id', Number(id))
+  .order('position', { ascending: true });
+
+const club     = tournament.clubs        as { name: string; slug: string } | null;
+const league   = tournament.leagues      as { name: string; slug: string } | null;
+const room     = tournament.rooms        as { name: string } | null;
+const uploader = tournament.admin_profiles as { name: string; email: string } | null;
+
+// Stats
+type ResultRow = {
+  id: number;
+  position: number;
+  prize: number | null;
+  currency: string | null;
+  elo_change: number | null;
+  elo_before: number | null;
+  elo_after: number | null;
+  reentries: number | null;
+  bounties: number | null;
+  league_points: number | null;
+  players: { id: number; nickname: string; slug: string; elo_rating: number; countries: { flag_emoji: string; name: string } | null } | null;
+};
+
+const rows         = (results ?? []) as ResultRow[];
+const prizeRows    = rows.filter(r => r.prize && r.prize > 0);
+const totalPrize   = prizeRows.reduce((s, r) => s + (r.prize ?? 0), 0);
+const itm          = prizeRows.length;
+const itmPct       = rows.length ? Math.round((itm / rows.length) * 100) : 0;
+const eloChanges   = rows.map(r => r.elo_change ?? 0);
+const maxEloGain   = eloChanges.length ? Math.max(...eloChanges) : 0;
+const maxEloLoss   = eloChanges.length ? Math.min(...eloChanges) : 0;
+
+function posLabel(pos: number): string {
+  if (pos === 1) return '1ST';
+  if (pos === 2) return '2ND';
+  if (pos === 3) return '3RD';
+  return `${pos}°`;
+}
+
+function posClass(pos: number): string {
+  if (pos === 1) return 'pos-first';
+  if (pos === 2) return 'pos-second';
+  if (pos === 3) return 'pos-third';
+  return '';
+}
+
+function rowClass(pos: number): string {
+  if (pos === 1) return 'r-row top-1';
+  if (pos === 2) return 'r-row top-2';
+  if (pos === 3) return 'r-row top-3';
+  return 'r-row';
+}
+
+function eloClass(change: number): string {
+  if (change > 0) return 'elo-up';
+  if (change < 0) return 'elo-down';
+  return 'elo-same';
+}
+
+function eloText(change: number): string {
+  if (change > 0) return `+${change.toFixed(1)}`;
+  if (change < 0) return `${change.toFixed(1)}`;
+  return '—';
+}
+
+const processedRows = rows.map(r => ({
+  id:          r.id,
+  position:    r.position,
+  posLbl:      posLabel(r.position),
+  posCls:      posClass(r.position),
+  rowCls:      rowClass(r.position),
+  prize:       r.prize,
+  currency:    r.currency ?? '',
+  hasPrize:    !!(r.prize && r.prize > 0),
+  reentries:   r.reentries ?? 0,
+  bounties:    r.bounties ?? 0,
+  lgPoints:    r.league_points ?? 0,
+  eloBefore:   r.elo_before ?? '—',
+  eloAfter:    r.elo_after ?? '—',
+  eloChange:   r.elo_change ?? 0,
+  eloCls:      eloClass(r.elo_change ?? 0),
+  eloTxt:      eloText(r.elo_change ?? 0),
+  playerNick:  r.players?.nickname ?? '—',
+  playerSlug:  r.players?.slug ?? '',
+  playerElo:   r.players?.elo_rating ?? 1200,
+  countryFlag: r.players?.countries?.flag_emoji ?? '',
+  countryName: r.players?.countries?.name ?? '',
+}));
+---
+
+<AdminLayout title={`Torneo: ${tournament.name}`}>
+
+<div class="page-wrap">
+
+  <!-- ── Header ─────────────────────────────── -->
+  <div class="page-header">
+    <div class="page-header-left">
+      <a href="/admin/torneos" class="back-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        VOLVER
+      </a>
+      <div>
+        <div class="page-eyebrow">DETALLE DE TORNEO</div>
+        <h1 class="page-title">{tournament.name}</h1>
+      </div>
+    </div>
+    <div class="page-header-actions">
+      {!tournament.is_verified ? (
+        <button class="btn-verify" id="btn-verify" data-id={tournament.id}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+          VERIFICAR Y CALCULAR ELO
+        </button>
+      ) : (
+        <span class="verified-pill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+          VERIFICADO
+        </span>
+      )}
+      <button class="btn-danger" id="btn-delete" data-id={tournament.id}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>
+        </svg>
+        ELIMINAR
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Info cards ─────────────────────────── -->
+  <div class="info-grid">
+
+    <!-- Datos generales -->
+    <div class="info-card">
+      <div class="info-card-title">DATOS GENERALES</div>
+      <div class="info-rows">
+        <div class="info-row">
+          <span class="ir-label">CLUB</span>
+          <span class="ir-value">{club?.name ?? '—'}</span>
+        </div>
+        <div class="info-row">
+          <span class="ir-label">SALA</span>
+          <span class="ir-value">{room?.name ?? '—'}</span>
+        </div>
+        <div class="info-row">
+          <span class="ir-label">LIGA</span>
+          <span class="ir-value">{league?.name ?? 'Sin liga'}</span>
+        </div>
+        <div class="info-row">
+          <span class="ir-label">FECHA</span>
+          <span class="ir-value">{tournament.date}</span>
+        </div>
+        <div class="info-row">
+          <span class="ir-label">ESTADO</span>
+          <span class={tournament.is_verified ? 'status-badge verified' : 'status-badge pending'}>
+            {tournament.is_verified ? 'VERIFICADO' : 'PENDIENTE'}
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="ir-label">SUBIDO POR</span>
+          <span class="ir-value">{uploader?.name ?? '—'}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats del torneo -->
+    <div class="info-card">
+      <div class="info-card-title">ESTADÍSTICAS</div>
+      <div class="info-rows">
+        <div class="info-row">
+          <span class="ir-label">JUGADORES</span>
+          <span class="ir-value ir-big">{tournament.total_players}</span>
+        </div>
+        {tournament.total_entries && tournament.total_entries !== tournament.total_players && (
+          <div class="info-row">
+            <span class="ir-label">TOTAL ENTRIES</span>
+            <span class="ir-value">{tournament.total_entries}</span>
+          </div>
+        )}
+        {tournament.buy_in && (
+          <div class="info-row">
+            <span class="ir-label">BUY-IN</span>
+            <span class="ir-value">{tournament.buy_in} {tournament.currency}</span>
+          </div>
+        )}
+        {totalPrize > 0 && (
+          <div class="info-row">
+            <span class="ir-label">PRIZE POOL</span>
+            <span class="ir-value ir-green">{totalPrize.toFixed(0)} {prizeRows[0]?.currency ?? ''}</span>
+          </div>
+        )}
+        <div class="info-row">
+          <span class="ir-label">IN THE MONEY</span>
+          <span class="ir-value">{itm} ({itmPct}%)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats ELO -->
+    <div class="info-card">
+      <div class="info-card-title">IMPACTO ELO</div>
+      <div class="info-rows">
+        <div class="info-row">
+          <span class="ir-label">ESTADO</span>
+          <span class={tournament.is_verified ? 'ir-value ir-green' : 'ir-value ir-yellow'}>
+            {tournament.is_verified ? 'CALCULADO' : 'SIN CALCULAR'}
+          </span>
+        </div>
+        {tournament.is_verified && (
+          <>
+            <div class="info-row">
+              <span class="ir-label">MAYOR GANANCIA</span>
+              <span class="ir-value ir-green">+{maxEloGain.toFixed(1)}</span>
+            </div>
+            <div class="info-row">
+              <span class="ir-label">MAYOR PÉRDIDA</span>
+              <span class="ir-value ir-red">{maxEloLoss.toFixed(1)}</span>
+            </div>
+          </>
+        )}
+        {tournament.tournament_weight && (
+          <div class="info-row">
+            <span class="ir-label">PESO DEL TORNEO</span>
+            <span class="ir-value">{tournament.tournament_weight}x</span>
+          </div>
+        )}
+        {tournament.notes && (
+          <div class="info-row">
+            <span class="ir-label">NOTAS</span>
+            <span class="ir-value ir-notes">{tournament.notes}</span>
+          </div>
+        )}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Results table ──────────────────────── -->
+  <div class="section-head">
+    <div>
+      <div class="section-eyebrow-sm">RESULTADOS</div>
+      <h2 class="section-title-sm">CLASIFICACIÓN FINAL</h2>
+    </div>
+    <span class="count-pill">{processedRows.length} jugadores</span>
+  </div>
+
+  <div class="results-table">
+
+    <div class="rt-head">
+      <span>POS</span>
+      <span>JUGADOR</span>
+      <span class="col-elo-before">ELO ANTES</span>
+      <span>ELO CAMBIO</span>
+      <span class="col-elo-after">ELO DESPUÉS</span>
+      <span class="col-prize">PREMIO</span>
+      <span class="col-re">RE-E</span>
+      <span class="col-bo">BOUNTIES</span>
+      {league && <span class="col-pts">PUNTOS</span>}
+    </div>
+
+    <div class="rt-body">
+      {processedRows.map(r => (
+        <div class={r.rowCls}>
+          <div>
+            <span class={`pos-badge ${r.posCls}`}>{r.posLbl}</span>
+          </div>
+          <div class="p-cell">
+            {r.countryFlag && <span class="p-flag">{r.countryFlag}</span>}
+            <div class="p-info">
+              <a href={`/jugador/${r.playerSlug}`} target="_blank" class="p-nick">
+                {r.playerNick}
+              </a>
+              {r.countryName && <span class="p-country">{r.countryName}</span>}
+            </div>
+          </div>
+          <div class="col-elo-before">
+            <span class="elo-mono">{r.eloBefore}</span>
+          </div>
+          <div>
+            <span class={r.eloCls}>{r.eloTxt}</span>
+          </div>
+          <div class="col-elo-after">
+            <span class="elo-mono">{r.eloAfter}</span>
+          </div>
+          <div class="col-prize">
+            {r.hasPrize
+              ? <span class="prize-val">{Number(r.prize).toFixed(0)} {r.currency}</span>
+              : <span class="no-val">—</span>
+            }
+          </div>
+          <div class="col-re">
+            <span class={r.reentries > 0 ? 'reentry-val' : 'no-val'}>{r.reentries}</span>
+          </div>
+          <div class="col-bo">
+            <span class={r.bounties > 0 ? 'bounty-val' : 'no-val'}>{r.bounties}</span>
+          </div>
+          {league && (
+            <div class="col-pts">
+              <span class="pts-val">{r.lgPoints}</span>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {processedRows.length === 0 && (
+        <div class="rt-empty">SIN RESULTADOS CARGADOS</div>
+      )}
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ── Modal verificar ─────────────────────── -->
+<div class="modal-backdrop" id="modal-verify" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">VERIFICAR TORNEO</div>
+      <button class="modal-close" id="modal-verify-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">
+        Al verificar este torneo se realizarán las siguientes acciones:
+      </p>
+      <ul class="modal-actions-list">
+        <li>Calcular cambios de ELO para los {processedRows.length} jugadores</li>
+        <li>Actualizar el ranking global</li>
+        <li>Registrar historial de ELO por jugador</li>
+        <li>Hacer el torneo visible públicamente</li>
+      </ul>
+      <div class="modal-warning">
+        Esta acción es irreversible. El ELO no se puede deshacer sin un recálculo masivo.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="modal-verify-cancel">CANCELAR</button>
+      <button class="btn-confirm" id="modal-verify-confirm">
+        VERIFICAR Y CALCULAR ELO
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal eliminar ──────────────────────── -->
+<div class="modal-backdrop" id="modal-delete" style="display:none">
+  <div class="modal modal-danger">
+    <div class="modal-header">
+      <div class="modal-title">ELIMINAR TORNEO</div>
+      <button class="modal-close" id="modal-delete-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">
+        ¿Confirmas que deseas eliminar el torneo
+        <strong>{tournament.name}</strong>?
+      </p>
+      <div class="modal-warning modal-warning--danger">
+  Esta acción eliminará todos los resultados asociados.
+  Si el torneo estaba verificado, el ELO de los jugadores
+  será revertido automáticamente. Para correcciones de
+  precisión, usa el recálculo masivo desde el panel principal.
+</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="modal-delete-cancel">CANCELAR</button>
+      <button class="btn-danger-confirm" id="modal-delete-confirm">
+        ELIMINAR TORNEO
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────── -->
+<div class="toast" id="toast"></div>
+
+</AdminLayout>
+
+<script define:vars={{ tournamentId: tournament.id, isVerified: tournament.is_verified }}>
+
+// ── Toast ──────────────────────────────────
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.className   = 'toast toast--' + type + ' toast--show';
+  setTimeout(() => toast.classList.remove('toast--show'), 3500);
+}
+
+// ── Modal helpers ──────────────────────────
+function openModal(id)  { const m = document.getElementById(id); if (m) m.style.display = 'flex'; }
+function closeModal(id) { const m = document.getElementById(id); if (m) m.style.display = 'none'; }
+
+// ── Verificar ──────────────────────────────
+document.getElementById('btn-verify')?.addEventListener('click', () => {
+  openModal('modal-verify');
+});
+
+document.getElementById('modal-verify-close')?.addEventListener('click',  () => closeModal('modal-verify'));
+document.getElementById('modal-verify-cancel')?.addEventListener('click', () => closeModal('modal-verify'));
+
+document.getElementById('modal-verify-confirm')?.addEventListener('click', async () => {
+  const btn = document.getElementById('modal-verify-confirm');
+  if (btn) { btn.textContent = 'CALCULANDO...'; btn.disabled = true; }
+
+  try {
+    const res  = await fetch('/api/admin/verificar-torneo', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tournament_id: tournamentId }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closeModal('modal-verify');
+      showToast('Torneo verificado. ELO calculado correctamente.', 'success');
+
+      // Actualizar UI
+      setTimeout(() => window.location.reload(), 1500);
+    } else {
+      showToast(data.error ?? 'Error al verificar el torneo.', 'error');
+      if (btn) { btn.textContent = 'VERIFICAR Y CALCULAR ELO'; btn.disabled = false; }
+    }
+  } catch {
+    showToast('Error de conexión.', 'error');
+    if (btn) { btn.textContent = 'VERIFICAR Y CALCULAR ELO'; btn.disabled = false; }
+  }
+});
+
+// ── Eliminar ───────────────────────────────
+document.getElementById('btn-delete')?.addEventListener('click', () => {
+  openModal('modal-delete');
+});
+
+document.getElementById('modal-delete-close')?.addEventListener('click',  () => closeModal('modal-delete'));
+document.getElementById('modal-delete-cancel')?.addEventListener('click', () => closeModal('modal-delete'));
+
+document.getElementById('modal-delete-confirm')?.addEventListener('click', async () => {
+  const btn = document.getElementById('modal-delete-confirm');
+  if (btn) { btn.textContent = 'ELIMINANDO...'; btn.disabled = true; }
+
+  try {
+    const res  = await fetch(`/api/admin/eliminar-torneo`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tournament_id: tournamentId }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast('Torneo eliminado correctamente.', 'success');
+      setTimeout(() => window.location.href = '/admin/torneos', 1200);
+    } else {
+      showToast(data.error ?? 'Error al eliminar.', 'error');
+      if (btn) { btn.textContent = 'ELIMINAR TORNEO'; btn.disabled = false; }
+    }
+  } catch {
+    showToast('Error de conexión.', 'error');
+    if (btn) { btn.textContent = 'ELIMINAR TORNEO'; btn.disabled = false; }
+  }
+});
+
+// ── Cerrar modales al click en backdrop ────
+document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) backdrop.style.display = 'none';
+  });
+});
+</script>
+
+<style>
+.page-wrap { padding: 2rem; max-width: 1280px; margin: 0 auto; }
+
+/* ── Header ───────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.page-header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  text-decoration: none;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 8px 14px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+
+.back-btn:hover {
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+}
+
+.page-eyebrow {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  margin-bottom: 0.3rem;
+  opacity: 0.7;
+}
+
+.page-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Botones de acción */
+.btn-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  padding: 11px 22px;
+  border-radius: 7px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(41,121,255,0.35);
+  transition: all 0.2s;
+}
+
+.btn-verify:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(41,121,255,0.5);
+}
+
+.btn-verify:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.verified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--success);
+  background: rgba(0,230,118,0.08);
+  border: 1px solid rgba(0,230,118,0.2);
+  padding: 10px 18px;
+  border-radius: 7px;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--danger);
+  background: rgba(255,82,82,0.07);
+  border: 1px solid rgba(255,82,82,0.2);
+  padding: 10px 18px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover {
+  background: rgba(255,82,82,0.14);
+  border-color: rgba(255,82,82,0.4);
+}
+
+/* ── Info grid ────────────────────────────── */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.info-card {
+  position: relative;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 1.5rem;
+  overflow: hidden;
+}
+
+.info-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8%; right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+}
+
+.info-card-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  opacity: 0.65;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.info-rows { display: flex; flex-direction: column; gap: 0.7rem; }
+
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ir-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.ir-value {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.ir-big   { font-size: 1.4rem; color: #fff; font-family: 'JetBrains Mono', monospace; }
+.ir-green { color: var(--success); }
+.ir-red   { color: var(--danger); }
+.ir-yellow { color: var(--warning); }
+.ir-notes { font-size: 0.72rem; font-weight: 500; max-width: 180px; text-align: right; line-height: 1.4; }
+
+.status-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 3px 10px;
+  border-radius: 50px;
+  border: 1px solid;
+}
+
+.status-badge.verified {
+  color: var(--success);
+  background: rgba(0,230,118,0.08);
+  border-color: rgba(0,230,118,0.2);
+}
+
+.status-badge.pending {
+  color: var(--warning);
+  background: rgba(255,215,64,0.08);
+  border-color: rgba(255,215,64,0.2);
+}
+
+/* ── Section head ─────────────────────────── */
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.section-eyebrow-sm {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  opacity: 0.65;
+  margin-bottom: 0.2rem;
+}
+
+.section-title-sm {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 0.03em;
+}
+
+.count-pill {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.07);
+  border: 1px solid rgba(0,229,255,0.18);
+  padding: 5px 12px;
+  border-radius: 50px;
+}
+
+/* ── Results table ────────────────────────── */
+.results-table {
+  position: relative;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.14);
+}
+
+.results-table::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 5%; right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6) 50%, transparent);
+  z-index: 2;
+}
+
+.rt-head {
+  display: grid;
+  grid-template-columns: 70px 1fr 100px 100px 110px 110px 60px 80px;
+  padding: 0.875rem 1.5rem;
+  background: rgba(41,121,255,0.08);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.rt-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: rgba(0,229,255,0.4);
+}
+
+.rt-body { display: flex; flex-direction: column; }
+
+.r-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 100px 100px 110px 110px 60px 80px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 58px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+
+.r-row:hover { background: rgba(255,255,255,0.04); }
+
+.r-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s;
+}
+
+.r-row:hover::before { height: 60%; }
+
+.r-row.top-1 { background: linear-gradient(90deg, rgba(232,197,90,0.08) 0%, transparent 60%); }
+.r-row.top-1::before { height: 60%; background: linear-gradient(180deg, #e8c55a, #f7e08a); box-shadow: 0 0 10px rgba(232,197,90,0.4); }
+.r-row.top-2 { background: linear-gradient(90deg, rgba(180,195,210,0.06) 0%, transparent 50%); }
+.r-row.top-2::before { height: 60%; background: linear-gradient(180deg, #b0c4d8, #d8e8f5); }
+.r-row.top-3 { background: linear-gradient(90deg, rgba(200,140,90,0.06) 0%, transparent 50%); }
+.r-row.top-3::before { height: 60%; background: linear-gradient(180deg, #c88050, #e0aa7a); }
+
+.pos-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  display: inline-block;
+}
+
+.pos-first  { color: #f7e08a; border-color: rgba(247,224,138,0.4); background: rgba(232,197,90,0.12); }
+.pos-second { color: #d0e8f5; border-color: rgba(208,232,245,0.3); background: rgba(180,210,240,0.08); }
+.pos-third  { color: #e0aa7a; border-color: rgba(224,170,122,0.3); background: rgba(200,140,90,0.08); }
+.pos-badge:not(.pos-first):not(.pos-second):not(.pos-third) {
+  color: var(--text-faint);
+  border-color: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.03);
+}
+
+.p-cell  { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.p-flag  { font-size: 1.1rem; flex-shrink: 0; }
+.p-info  { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.p-nick  {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.p-nick:hover { color: var(--accent2); }
+.p-country { font-family: 'Barlow Condensed', sans-serif; font-size: 0.62rem; color: rgba(255,255,255,0.2); }
+
+.elo-mono   { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--text-faint); }
+.prize-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--success); }
+.reentry-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--warning); }
+.bounty-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #c4b5fd; }
+.pts-val    { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--accent2); }
+.no-val     { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: rgba(255,255,255,0.12); }
+
+.rt-empty {
+  padding: 3rem;
+  text-align: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.18);
+}
+
+/* ── Modals ───────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(6px);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal {
+  background: #12121f;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.modal-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #fff;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.modal-close:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+.modal-body { padding: 1.5rem; }
+
+.modal-desc {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.modal-desc strong { color: #fff; }
+
+.modal-actions-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.modal-actions-list li {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  padding-left: 1rem;
+  position: relative;
+}
+
+.modal-actions-list li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--accent2);
+}
+
+.modal-warning {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--warning);
+  background: rgba(255,215,64,0.06);
+  border: 1px solid rgba(255,215,64,0.18);
+  border-radius: 6px;
+  padding: 10px 14px;
+  line-height: 1.5;
+}
+
+.modal-warning--danger {
+  color: var(--danger);
+  background: rgba(255,82,82,0.06);
+  border-color: rgba(255,82,82,0.18);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+.btn-cancel {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel:hover { color: var(--text-dim); background: rgba(255,255,255,0.08); }
+
+.btn-confirm {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  padding: 10px 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(41,121,255,0.3);
+  transition: all 0.2s;
+}
+
+.btn-confirm:hover { opacity: 0.9; }
+.btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-danger-confirm {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #fff;
+  background: rgba(255,82,82,0.8);
+  border: 1px solid rgba(255,82,82,0.5);
+  padding: 10px 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-danger-confirm:hover { background: rgba(255,82,82,1); }
+.btn-danger-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Toast ────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 999;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 12px 22px;
+  border-radius: 8px;
+  border: 1px solid;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+.toast--show { opacity: 1; transform: translateY(0); }
+
+.toast--success {
+  color: var(--success);
+  background: rgba(0,230,118,0.1);
+  border-color: rgba(0,230,118,0.25);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.toast--error {
+  color: var(--danger);
+  background: rgba(255,82,82,0.1);
+  border-color: rgba(255,82,82,0.25);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 1024px) {
+  .info-grid { grid-template-columns: repeat(2, 1fr); }
+  .rt-head, .r-row { grid-template-columns: 65px 1fr 90px 90px 90px; }
+  .col-elo-before, .col-re, .col-bo { display: none; }
+}
+
+@media (max-width: 768px) {
+  .page-wrap { padding: 1.25rem; }
+  .info-grid { grid-template-columns: 1fr; }
+  .page-header { flex-direction: column; }
+  .rt-head, .r-row { grid-template-columns: 60px 1fr 85px 85px; }
+  .col-elo-after { display: none; }
+}
+</style>

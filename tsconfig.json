@@ -1,0 +1,18 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@components/*": ["src/components/*"],
+      "@layouts/*":    ["src/layouts/*"],
+      "@lib/*":        ["src/lib/*"],
+      "@styles/*":     ["src/styles/*"],
+      "@pages/*":      ["src/pages/*"],
+      "@/*":           ["src/*"]
+    },
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src", ".astro/types.d.ts"]
+}

@@ -1,0 +1,643 @@
+---
+// src/pages/torneo/[id].astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { id } = Astro.params;
+const supabase = createServerClient();
+
+if (!id || isNaN(Number(id))) return Astro.redirect('/');
+
+const { data: tournament } = await supabase
+  .from('tournaments')
+  .select(`
+    *,
+    clubs   ( name, slug ),
+    leagues ( name, slug ),
+    rooms   ( name )
+  `)
+  .eq('id', Number(id))
+  .eq('is_verified', true)
+  .single();
+
+if (!tournament) return Astro.redirect('/');
+
+const { data: results } = await supabase
+  .from('tournament_results')
+  .select(`
+    position, prize, currency, elo_change, elo_before, elo_after,
+    reentries, bounties,
+    players ( nickname, slug, countries ( name, flag_emoji ) )
+  `)
+  .eq('tournament_id', Number(id))
+  .order('position', { ascending: true });
+
+const club   = tournament.clubs   as { name: string; slug: string } | null;
+const league = tournament.leagues as { name: string; slug: string } | null;
+const room   = tournament.rooms   as { name: string } | null;
+
+// Stats del torneo
+const prizeResults = (results ?? []).filter(r => r.prize && r.prize > 0);
+const totalPrize   = prizeResults.reduce((sum, r) => sum + (r.prize ?? 0), 0);
+const itm          = prizeResults.length;
+const itmPct       = results?.length ? Math.round((itm / results.length) * 100) : 0;
+const avgEloChange = results?.length
+  ? (results.reduce((sum, r) => sum + (r.elo_change ?? 0), 0) / results.length).toFixed(1)
+  : '0';
+
+// Tipos auxiliares
+type PlayerRel  = { nickname: string; slug: string; countries: { name: string; flag_emoji: string } | null } | null;
+
+// Funciones auxiliares — todas en el frontmatter
+function posClass(pos: number): string {
+  if (pos === 1) return 'pos-first';
+  if (pos === 2) return 'pos-second';
+  if (pos === 3) return 'pos-third';
+  return '';
+}
+
+function posLabel(pos: number): string {
+  if (pos === 1) return '1ST';
+  if (pos === 2) return '2ND';
+  if (pos === 3) return '3RD';
+  return `${pos}TH`;
+}
+
+function eloClass(change: number): string {
+  if (change > 0) return 'elo-up';
+  if (change < 0) return 'elo-down';
+  return 'elo-same';
+}
+
+function eloText(change: number): string {
+  if (change > 0) return `+${change.toFixed(1)}`;
+  if (change < 0) return `${change.toFixed(1)}`;
+  return '—';
+}
+
+function rowClass(pos: number): string {
+  if (pos === 1) return 'r-row top-1';
+  if (pos === 2) return 'r-row top-2';
+  if (pos === 3) return 'r-row top-3';
+  return 'r-row';
+}
+
+// Pre-procesar resultados para evitar lógica en el template
+const processedResults = (results ?? []).map(r => {
+  const player  = r.players as PlayerRel;
+  const country = player?.countries ?? null;
+  const change  = r.elo_change ?? 0;
+  return {
+    position:    r.position,
+    prize:       r.prize,
+    currency:    r.currency,
+    reentries:   r.reentries ?? 0,
+    bounties:    r.bounties ?? 0,
+    change,
+    playerNick:  player?.nickname ?? '—',
+    playerSlug:  player?.slug ?? '',
+    countryFlag: country?.flag_emoji ?? '',
+    countryName: country?.name ?? '',
+    hasPrize:    !!(r.prize && r.prize > 0),
+    rowCls:      rowClass(r.position),
+    posCls:      posClass(r.position),
+    posLbl:      posLabel(r.position),
+    eloCls:      eloClass(change),
+    eloTxt:      eloText(change),
+  };
+});
+---
+
+<PublicLayout
+  title={tournament.name}
+  description={`Resultados del torneo ${tournament.name} — ${tournament.date}. ${tournament.total_players} jugadores. Club: ${club?.name}.`}
+  ogType="article"
+  ogTitle={tournament.name}
+>
+
+<!-- ── TOURNAMENT HEADER ──────────────────── -->
+<section class="torneo-hero">
+  <div class="section-wrap">
+
+    <!-- Breadcrumb -->
+    <div class="breadcrumb">
+      <a href="/" class="bc-link">RANKING</a>
+      <span class="bc-sep">/</span>
+      {club && <a href={`/club/${club.slug}`} class="bc-link">{club.name}</a>}
+      {club && <span class="bc-sep">/</span>}
+      <span class="bc-current">{tournament.name}</span>
+    </div>
+
+    <!-- Main card -->
+    <div class="torneo-header crystal crystal-heavy">
+
+      <div class="torneo-header-top">
+        <div class="torneo-meta-left">
+          <div class="torneo-badges">
+            {league && (
+              <a href={`/rankings/${league.slug}`} class="league-badge">
+                {league.name}
+              </a>
+            )}
+            {room && (
+              <span class="room-badge">{room.name}</span>
+            )}
+            <span class="verified-badge">VERIFICADO</span>
+          </div>
+          <h1 class="torneo-name">{tournament.name}</h1>
+          <div class="torneo-sub">
+            {club && <span>{club.name}</span>}
+            <span class="meta-sep">·</span>
+            <span>{tournament.date}</span>
+          </div>
+        </div>
+
+        <div class="torneo-field-display">
+          <div class="field-label">CAMPO</div>
+          <div class="field-number">{tournament.total_players}</div>
+          <div class="field-sub">JUGADORES</div>
+        </div>
+      </div>
+
+      <!-- Info row -->
+      <div class="torneo-info-row">
+        {tournament.buy_in && (
+          <div class="info-item">
+            <span class="info-label">BUY-IN</span>
+            <span class="info-value">{tournament.buy_in} {tournament.currency}</span>
+          </div>
+        )}
+        {totalPrize > 0 && (
+          <div class="info-item">
+            <span class="info-label">PRIZE POOL</span>
+            <span class="info-value">{totalPrize.toFixed(0)} {prizeResults[0]?.currency ?? ''}</span>
+          </div>
+        )}
+        <div class="info-item">
+          <span class="info-label">IN THE MONEY</span>
+          <span class="info-value">{itm} ({itmPct}%)</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">ELO PROMEDIO</span>
+          <span class="info-value">{avgEloChange}</span>
+        </div>
+        {tournament.total_entries && tournament.total_entries !== tournament.total_players && (
+          <div class="info-item">
+            <span class="info-label">TOTAL ENTRIES</span>
+            <span class="info-value">{tournament.total_entries}</span>
+          </div>
+        )}
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── RESULTS TABLE ──────────────────────── -->
+<section class="results-section">
+  <div class="section-wrap">
+
+    <div class="section-head">
+      <div>
+        <div class="section-eyebrow">RESULTADOS OFICIALES</div>
+        <div class="section-title">CLASIFICACIÓN FINAL</div>
+      </div>
+      <span class="total-badge">{processedResults.length} JUGADORES</span>
+    </div>
+
+    <div class="table-crystal">
+      <div class="r-head">
+        <span>POS</span>
+        <span>JUGADOR</span>
+        <span class="col-prize">PREMIO</span>
+        <span class="col-re">RE-ENTRIES</span>
+        <span class="col-bo">BOUNTIES</span>
+        <span>ELO</span>
+      </div>
+
+      <div class="t-body">
+        {processedResults.map(r => (
+          <a href={r.playerSlug ? `/jugador/${r.playerSlug}` : '#'} class={r.rowCls}>
+            <div>
+              <span class={`pos-badge ${r.posCls}`}>{r.posLbl}</span>
+            </div>
+            <div class="p-cell">
+              {r.countryFlag && <span class="p-flag">{r.countryFlag}</span>}
+              <div class="p-info">
+                <span class="p-nick">{r.playerNick}</span>
+                {r.countryName && <span class="p-country">{r.countryName}</span>}
+              </div>
+            </div>
+            <div class="col-prize">
+              {r.hasPrize
+                ? <span class="prize-val">{Number(r.prize).toFixed(0)} {r.currency}</span>
+                : <span class="no-prize">—</span>
+              }
+            </div>
+            <div class="col-re">
+              <span class="meta-val">{r.reentries}</span>
+            </div>
+            <div class="col-bo">
+              <span class="meta-val">{r.bounties}</span>
+            </div>
+            <div>
+              <span class={r.eloCls}>{r.eloTxt}</span>
+            </div>
+          </a>
+        ))}
+        {processedResults.length === 0 && (
+          <div class="t-empty">SIN RESULTADOS</div>
+        )}
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</PublicLayout>
+
+<style>
+/* ── Hero ─────────────────────────────────── */
+.torneo-hero { padding: 2.5rem 0 0; }
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.bc-link {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.bc-link:hover { color: var(--accent2); }
+
+.bc-sep {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.5);
+}
+
+.bc-current {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+
+/* Header card */
+.torneo-header {
+  padding: 2rem 2.5rem;
+  margin-bottom: 3rem;
+}
+
+.torneo-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 1.75rem;
+  flex-wrap: wrap;
+}
+
+.torneo-badges {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.league-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #7dd3fc;
+  text-decoration: none;
+  background: rgba(41,121,255,0.12);
+  border: 1px solid rgba(41,121,255,0.28);
+  padding: 4px 12px;
+  border-radius: 50px;
+  transition: all 0.2s;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.league-badge:hover {
+  background: rgba(41,121,255,0.2);
+  border-color: rgba(41,121,255,0.5);
+}
+
+.room-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 4px 12px;
+  border-radius: 50px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.verified-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--success);
+  background: rgba(0,230,118,0.08);
+  border: 1px solid rgba(0,230,118,0.2);
+  padding: 4px 12px;
+  border-radius: 50px;
+}
+
+.torneo-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  line-height: 0.92;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 20px rgba(41,121,255,0.3));
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+}
+
+.torneo-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+}
+
+.meta-sep { opacity: 0.75; }
+
+.torneo-field-display { text-align: right; flex-shrink: 0; }
+
+.field-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  text-shadow: 0 0 10px rgba(0,229,255,0.4);
+  margin-bottom: 0.2rem;
+}
+
+.field-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 700;
+  line-height: 1;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px rgba(41,121,255,0.5));
+}
+
+.field-sub {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+  margin-top: 0.2rem;
+}
+
+.torneo-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 1.5rem;
+}
+
+.info-item { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.info-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--accent2);
+  opacity: 1;
+}
+
+.info-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* ── Results section ─────────────────────── */
+.results-section { padding: 0 0 6rem; }
+
+.total-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 6px 14px;
+  border-radius: 50px;
+  backdrop-filter: blur(8px);
+}
+
+.table-crystal {
+  position: relative;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.5),
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.15);
+}
+
+.table-crystal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 5%; right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,0.55) 25%,
+    rgba(255,255,255,0.85) 50%,
+    rgba(255,255,255,0.55) 75%, transparent
+  );
+  z-index: 2;
+  pointer-events: none;
+}
+
+.table-crystal::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -1px;
+  width: 3px; height: 100%;
+  background: linear-gradient(180deg,
+    rgba(41,121,255,0.7), rgba(0,229,255,0.4),
+    rgba(41,121,255,0.2), transparent
+  );
+  border-radius: 14px 0 0 14px;
+}
+
+.r-head {
+  display: grid;
+  grid-template-columns: 80px 1fr 130px 100px 100px 90px;
+  padding: 1rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.r-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.9);
+}
+
+.t-body { display: flex; flex-direction: column; }
+
+.r-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 130px 100px 100px 90px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 62px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.r-row:hover { background: rgba(255,255,255,0.05); }
+
+.r-row::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), rgba(255,255,255,0.06), transparent);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.r-row:hover::after { left: 140%; }
+
+.r-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.25s;
+  z-index: 1;
+}
+
+.r-row:hover::before { height: 65%; }
+
+.r-row.top-1 { background: linear-gradient(90deg, rgba(232,197,90,0.09) 0%, rgba(232,197,90,0.03) 40%, transparent 70%); }
+.r-row.top-1::before { height: 65%; background: linear-gradient(180deg, #e8c55a, #f7e08a); box-shadow: 0 0 12px rgba(232,197,90,0.5); }
+.r-row.top-2 { background: linear-gradient(90deg, rgba(180,195,210,0.07) 0%, transparent 60%); }
+.r-row.top-2::before { height: 65%; background: linear-gradient(180deg, #b0c4d8, #d8e8f5); }
+.r-row.top-3 { background: linear-gradient(90deg, rgba(200,140,90,0.07) 0%, transparent 60%); }
+.r-row.top-3::before { height: 65%; background: linear-gradient(180deg, #c88050, #e0aa7a); }
+
+.pos-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+  display: inline-block;
+}
+
+.pos-first  { color: #f7e08a; border-color: rgba(247,224,138,0.4); background: rgba(232,197,90,0.12); box-shadow: 0 0 12px rgba(232,197,90,0.2); }
+.pos-second { color: #d0e8f5; border-color: rgba(208,232,245,0.3); background: rgba(180,210,240,0.08); }
+.pos-third  { color: #e0aa7a; border-color: rgba(224,170,122,0.3); background: rgba(200,140,90,0.08); }
+.pos-badge:not(.pos-first):not(.pos-second):not(.pos-third) {
+  color: var(--text-faint);
+  border-color: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+
+.p-cell    { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+.p-flag    { font-size: 1.2rem; flex-shrink: 0; }
+.p-info    { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.p-nick    { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.r-row:hover .p-nick { color: var(--accent2); }
+.p-country { font-family: 'Barlow Condensed', sans-serif; font-size: 0.64rem; color: rgba(255,255,255,0.65); }
+
+.prize-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--success);
+  text-shadow: 0 0 10px rgba(0,230,118,0.3);
+}
+
+.no-prize {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.55);
+}
+
+.meta-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.t-empty {
+  padding: 4rem;
+  text-align: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.6);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .torneo-header { padding: 1.5rem; }
+  .torneo-header-top { flex-direction: column; gap: 1rem; }
+  .torneo-field-display { text-align: left; }
+  .r-head, .r-row { grid-template-columns: 70px 1fr 80px; }
+  .col-prize, .col-re, .col-bo { display: none; }
+}
+
+@media (max-width: 480px) {
+  .torneo-info-row { gap: 1.25rem; }
+}
+</style>
+</PublicLayout>

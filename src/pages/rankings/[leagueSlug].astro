@@ -1,0 +1,848 @@
+---
+// src/pages/rankings/[leagueSlug].astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { leagueSlug } = Astro.params;
+const supabase = createServerClient();
+
+if (!leagueSlug) return Astro.redirect('/');
+
+// ── Liga ──────────────────────────────────
+const { data: league } = await supabase
+  .from('leagues')
+  .select(`
+    *,
+    clubs ( name, slug, countries ( name, flag_emoji ) )
+  `)
+  .eq('slug', leagueSlug)
+  .eq('is_active', true)
+  .single();
+
+if (!league) return Astro.redirect('/');
+
+// ── Clasificación de la liga ──────────────
+const { data: standings } = await supabase
+  .from('league_standings')
+  .select(`
+    total_points, tournaments_played, best_position, average_position,
+    players ( id, nickname, slug, elo_rating, countries ( name, flag_emoji ) )
+  `)
+  .eq('league_id', league.id)
+  .order('total_points', { ascending: false });
+
+// ── Torneos de la liga ────────────────────
+const { data: tournaments } = await supabase
+  .from('tournaments')
+  .select('id, name, date, total_players, buy_in, currency')
+  .eq('league_id', league.id)
+  .eq('is_verified', true)
+  .order('date', { ascending: false });
+
+// ── Tipos ─────────────────────────────────
+const club    = league.clubs as { name: string; slug: string; countries: { name: string; flag_emoji: string } | null } | null;
+const scoring = league.scoring_system as {
+  points?: Record<string, number>;
+  participationPoints?: number;
+  bestNof?: number | null;
+} | null;
+
+// ── Helpers ───────────────────────────────
+function getEloBadge(elo: number): { cls: string; label: string } {
+  if (elo >= 1800) return { cls: 'tier-legend',  label: 'LEGEND'  };
+  if (elo >= 1600) return { cls: 'tier-master',  label: 'MASTER'  };
+  if (elo >= 1400) return { cls: 'tier-diamond', label: 'DIAMOND' };
+  if (elo >= 1300) return { cls: 'tier-gold',    label: 'GOLD'    };
+  if (elo >= 1200) return { cls: 'tier-silver',  label: 'SILVER'  };
+  if (elo >= 1100) return { cls: 'tier-bronze',  label: 'BRONZE'  };
+  return              { cls: 'tier-entry',   label: 'ENTRY'   };
+}
+
+function rankClass(rank: number): string {
+  if (rank === 1) return 'r-num gold';
+  if (rank === 2) return 'r-num silver';
+  if (rank === 3) return 'r-num bronze';
+  return 'r-num';
+}
+
+function rowClass(rank: number): string {
+  if (rank === 1) return 't-row top-1';
+  if (rank === 2) return 't-row top-2';
+  if (rank === 3) return 't-row top-3';
+  return 't-row';
+}
+
+// ── Pre-procesar standings ─────────────────
+type PlayerRel = {
+  id: number; nickname: string; slug: string; elo_rating: number;
+  countries: { name: string; flag_emoji: string } | null;
+} | null;
+
+const processedStandings = (standings ?? []).map((s, i) => {
+  const p     = s.players as PlayerRel;
+  const badge = getEloBadge(p?.elo_rating ?? 1200);
+  const rank  = i + 1;
+  return {
+    rank,
+    rowCls:       rowClass(rank),
+    rankCls:      rankClass(rank),
+    rankStr:      String(rank).padStart(2, '0'),
+    playerNick:   p?.nickname ?? '—',
+    playerSlug:   p?.slug ?? '',
+    playerElo:    p?.elo_rating ?? 1200,
+    countryFlag:  p?.countries?.flag_emoji ?? '',
+    countryName:  p?.countries?.name ?? '',
+    badge,
+    totalPoints:  Number(s.total_points ?? 0).toFixed(1),
+    tournsPlayed: s.tournaments_played ?? 0,
+    bestPos:      s.best_position ?? '—',
+    avgPos:       s.average_position ? Number(s.average_position).toFixed(1) : '—',
+  };
+});
+
+// ── Pre-procesar torneos ───────────────────
+const processedTournaments = (tournaments ?? []).map(t => ({
+  id:           t.id,
+  name:         t.name,
+  date:         t.date,
+  totalPlayers: t.total_players,
+  buyIn:        t.buy_in,
+  currency:     t.currency ?? '',
+}));
+
+// ── Pre-procesar scoring points ───────────
+const processedScoring = scoring?.points
+  ? Object.entries(scoring.points).map(([pos, pts]) => {
+      const posNum = Number(pos);
+      return {
+        posNum,
+        pts,
+        cls:   posNum <= 3 ? `score-top${posNum}` : '',
+        label: posNum === 1 ? '1°' : posNum === 2 ? '2°' : posNum === 3 ? '3°' : `${posNum}°`,
+      };
+    })
+  : [];
+
+// ── Stats generales ────────────────────────
+const totalPlayers     = processedStandings.length;
+const totalTournaments = processedTournaments.length;
+const leader           = processedStandings[0];
+---
+
+<PublicLayout
+  title={league.name}
+  description={`Clasificación de la liga ${league.name} — ${league.clubs?.name}. ${totalPlayers} jugadores rankeados.`}
+  ogTitle={league.name}
+>
+
+<!-- ── LEAGUE HERO ────────────────────────── -->
+<section class="league-hero">
+  <div class="section-wrap">
+
+    <!-- Breadcrumb -->
+    <div class="breadcrumb">
+      <a href="/" class="bc-link">RANKING</a>
+      <span class="bc-sep">/</span>
+      {club && <a href={`/club/${club.slug}`} class="bc-link">{club.name}</a>}
+      {club && <span class="bc-sep">/</span>}
+      <span class="bc-current">{league.name}</span>
+    </div>
+
+    <!-- Header card -->
+    <div class="league-header crystal crystal-heavy">
+      <div class="league-header-top">
+
+        <div class="league-identity">
+          <div class="league-meta-top">
+            {club && (
+              <a href={`/club/${club.slug}`} class="club-badge">
+                {club.countries?.flag_emoji} {club.name}
+              </a>
+            )}
+            <span class={league.is_active ? 'status-badge active' : 'status-badge inactive'}>
+              {league.is_active ? 'ACTIVA' : 'FINALIZADA'}
+            </span>
+          </div>
+
+          <h1 class="league-name">{league.name}</h1>
+
+          {league.description && (
+            <p class="league-desc">{league.description}</p>
+          )}
+
+          {(league.season_start || league.season_end) && (
+            <div class="league-dates">
+              <span class="ld-label">TEMPORADA</span>
+              <span class="ld-val">
+                {league.season_start ?? '—'} → {league.season_end ?? 'presente'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <!-- Líder actual -->
+        {leader && (
+          <div class="leader-display">
+            <div class="leader-label">LÍDER</div>
+            <a href={`/jugador/${leader.playerSlug}`} class="leader-nick">
+              {leader.countryFlag} {leader.playerNick}
+            </a>
+            <div class="leader-pts">{leader.totalPoints}</div>
+            <div class="leader-pts-label">PUNTOS</div>
+          </div>
+        )}
+
+      </div>
+
+      <!-- Stats row -->
+      <div class="league-stats-row">
+        <div class="ls-item">
+          <span class="ls-num">{totalPlayers}</span>
+          <span class="ls-label">JUGADORES</span>
+        </div>
+        <div class="ls-sep"></div>
+        <div class="ls-item">
+          <span class="ls-num">{totalTournaments}</span>
+          <span class="ls-label">TORNEOS</span>
+        </div>
+        {scoring?.bestNof && (
+          <Fragment>
+            <div class="ls-sep"></div>
+            <div class="ls-item">
+              <span class="ls-num">{scoring.bestNof}</span>
+              <span class="ls-label">MEJORES RESULTADOS</span>
+            </div>
+          </Fragment>
+        )}
+        {scoring?.participationPoints && (
+          <Fragment>
+            <div class="ls-sep"></div>
+            <div class="ls-item">
+              <span class="ls-num">{scoring.participationPoints}</span>
+              <span class="ls-label">PTS PARTICIPACIÓN</span>
+            </div>
+          </Fragment>
+        )}
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── STANDINGS TABLE ────────────────────── -->
+<section class="standings-section">
+  <div class="section-wrap">
+
+    <div class="section-head">
+      <div>
+        <div class="section-eyebrow">CLASIFICACIÓN</div>
+        <h2 class="section-title">TABLA DE POSICIONES</h2>
+      </div>
+    </div>
+
+    <div class="table-crystal">
+      <div class="st-head">
+        <span>POS</span>
+        <span>JUGADOR</span>
+        <span class="col-tier">TIER</span>
+        <span>PUNTOS</span>
+        <span class="col-stat">TORNEOS</span>
+        <span class="col-stat">MEJOR</span>
+        <span class="col-stat">PROMEDIO</span>
+      </div>
+
+      <div class="t-body">
+        {processedStandings.map(s => (
+          <a href={`/jugador/${s.playerSlug}`} class={s.rowCls}>
+            <div>
+              <span class={s.rankCls}>{s.rankStr}</span>
+            </div>
+            <div class="p-cell">
+              {s.countryFlag && <span class="p-flag">{s.countryFlag}</span>}
+              <div class="p-info">
+                <span class="p-nick">{s.playerNick}</span>
+                {s.countryName && <span class="p-country">{s.countryName}</span>}
+              </div>
+            </div>
+            <div class="col-tier">
+              <span class={`tier ${s.badge.cls}`}>{s.badge.label}</span>
+            </div>
+            <div>
+              <span class="pts-val">{s.totalPoints}</span>
+            </div>
+            <div class="col-stat">
+              <span class="s-val">{s.tournsPlayed}</span>
+            </div>
+            <div class="col-stat">
+              <span class="s-val">{s.bestPos}</span>
+            </div>
+            <div class="col-stat">
+              <span class="s-val">{s.avgPos}</span>
+            </div>
+          </a>
+        ))}
+        {processedStandings.length === 0 && (
+          <div class="t-empty">AÚN NO HAY CLASIFICACIÓN PARA ESTA LIGA</div>
+        )}
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── SISTEMA DE PUNTOS ──────────────────── -->
+{processedScoring.length > 0 && (
+  <section class="scoring-section">
+    <div class="section-wrap">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow">REGLAMENTO</div>
+          <h2 class="section-title">SISTEMA DE PUNTOS</h2>
+        </div>
+      </div>
+      <div class="scoring-grid">
+        {processedScoring.map(s => (
+          <div class={`score-item ${s.cls}`}>
+            <span class="score-pos">{s.label}</span>
+            <span class="score-pts">{s.pts}</span>
+            <span class="score-label">PTS</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- ── TORNEOS DE LA LIGA ─────────────────── -->
+{processedTournaments.length > 0 && (
+  <section class="torneos-section">
+    <div class="section-wrap">
+      <div class="section-head">
+        <div>
+          <div class="section-eyebrow">HISTORIAL</div>
+          <h2 class="section-title">TORNEOS DE LA LIGA</h2>
+        </div>
+        <span class="count-pill">{processedTournaments.length} torneos</span>
+      </div>
+
+      <div class="table-crystal">
+        <div class="to-head">
+          <span>FECHA</span>
+          <span>TORNEO</span>
+          <span>JUGADORES</span>
+          <span class="col-bi">BUY-IN</span>
+        </div>
+        <div class="t-body">
+          {processedTournaments.map(t => (
+            <a href={`/torneo/${t.id}`} class="to-row">
+              <div class="to-date">{t.date}</div>
+              <div class="to-name">{t.name}</div>
+              <div><span class="num-val">{t.totalPlayers}</span></div>
+              <div class="col-bi">
+                {t.buyIn
+                  ? <span class="buyin-val">{t.buyIn} {t.currency}</span>
+                  : <span class="no-val">—</span>
+                }
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+)}
+
+</PublicLayout>
+
+<style>
+/* ── Hero ─────────────────────────────────── */
+.league-hero { padding: 2.5rem 0 0; }
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.bc-link {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.bc-link:hover { color: var(--accent2); }
+.bc-sep { font-size: 0.65rem; color: rgba(255,255,255,0.12); }
+.bc-current {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+
+/* Header card */
+.league-header {
+  padding: 2rem 2.5rem;
+  margin-bottom: 3rem;
+}
+
+.league-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+/* Identity */
+.league-identity { flex: 1; min-width: 0; }
+
+.league-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.club-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #7dd3fc;
+  text-decoration: none;
+  background: rgba(41,121,255,0.1);
+  border: 1px solid rgba(41,121,255,0.25);
+  padding: 4px 12px;
+  border-radius: 50px;
+  transition: all 0.2s;
+}
+
+.club-badge:hover {
+  background: rgba(41,121,255,0.18);
+  border-color: rgba(41,121,255,0.45);
+}
+
+.status-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 3px 10px;
+  border-radius: 50px;
+  border: 1px solid;
+}
+
+.status-badge.active   { color: var(--success); background: rgba(0,230,118,0.07); border-color: rgba(0,230,118,0.2); }
+.status-badge.inactive { color: var(--text-faint); background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.1); }
+
+.league-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff 0%, rgba(180,220,255,0.85) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 20px rgba(41,121,255,0.3));
+  margin-bottom: 0.6rem;
+}
+
+.league-desc {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  max-width: 480px;
+  margin-bottom: 0.75rem;
+}
+
+.league-dates {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.ld-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  opacity: 1;
+}
+
+.ld-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+/* Leader display */
+.leader-display {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.leader-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent2);
+  opacity: 1;
+  margin-bottom: 0.3rem;
+}
+
+.leader-nick {
+  display: block;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(1.2rem, 2.5vw, 1.8rem);
+  font-weight: 900;
+  color: #fff;
+  text-transform: uppercase;
+  text-decoration: none;
+  letter-spacing: 0.03em;
+  transition: color 0.2s;
+  margin-bottom: 0.4rem;
+}
+
+.leader-nick:hover { color: var(--accent2); }
+
+.leader-pts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 700;
+  line-height: 1;
+  background: linear-gradient(180deg, #f7e08a, #c9a84c);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 16px rgba(232,197,90,0.4));
+}
+
+.leader-pts-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: rgba(232,197,90,0.5);
+  margin-top: 0.2rem;
+}
+
+/* Stats row */
+.league-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 1.5rem;
+  flex-wrap: wrap;
+  gap: 2rem;
+}
+
+.ls-item { display: flex; flex-direction: column; gap: 0.25rem; }
+.ls-sep  { width: 1px; height: 36px; background: rgba(255,255,255,0.07); align-self: center; }
+
+.ls-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+}
+
+.ls-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent2);
+  opacity: 1;
+}
+
+/* ── Standings table ──────────────────────── */
+.standings-section { padding: 0 0 3rem; }
+
+.table-crystal {
+  position: relative;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.5),
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.15);
+}
+
+.table-crystal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 5%; right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,0.55) 25%,
+    rgba(255,255,255,0.85) 50%,
+    rgba(255,255,255,0.55) 75%, transparent
+  );
+  z-index: 2;
+  pointer-events: none;
+}
+
+.table-crystal::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -1px;
+  width: 3px; height: 100%;
+  background: linear-gradient(180deg,
+    rgba(41,121,255,0.7), rgba(0,229,255,0.4),
+    rgba(41,121,255,0.2), transparent
+  );
+  border-radius: 14px 0 0 14px;
+}
+
+.st-head {
+  display: grid;
+  grid-template-columns: 64px 1fr 120px 110px 80px 80px 90px;
+  padding: 0.875rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.st-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.85);
+}
+
+.t-body { display: flex; flex-direction: column; }
+
+.t-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 120px 110px 80px 80px 90px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 62px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+
+.t-row:hover { background: rgba(255,255,255,0.05); }
+
+.t-row::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), rgba(255,255,255,0.06), transparent);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.t-row:hover::after { left: 140%; }
+
+.t-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.25s;
+  z-index: 1;
+}
+
+.t-row:hover::before { height: 65%; }
+
+.t-row.top-1 { background: linear-gradient(90deg, rgba(232,197,90,0.09) 0%, rgba(232,197,90,0.03) 40%, transparent 70%); }
+.t-row.top-1::before { height: 65%; background: linear-gradient(180deg, #e8c55a, #f7e08a); box-shadow: 0 0 12px rgba(232,197,90,0.5); }
+.t-row.top-2 { background: linear-gradient(90deg, rgba(180,195,210,0.07) 0%, transparent 60%); }
+.t-row.top-2::before { height: 65%; background: linear-gradient(180deg, #b0c4d8, #d8e8f5); }
+.t-row.top-3 { background: linear-gradient(90deg, rgba(200,140,90,0.07) 0%, transparent 60%); }
+.t-row.top-3::before { height: 65%; background: linear-gradient(180deg, #c88050, #e0aa7a); }
+
+.r-num        { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 800; color: rgba(255,255,255,0.18); }
+.r-num.gold   { font-size: 1.2rem; background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 8px rgba(232,197,90,0.5)); }
+.r-num.silver { font-size: 1.1rem; background: linear-gradient(180deg, #e0eefc, #90afc8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.r-num.bronze { background: linear-gradient(180deg, #e0aa7a, #a06030); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+.p-cell    { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+.p-flag    { font-size: 1.2rem; flex-shrink: 0; }
+.p-info    { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.p-nick    { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; color: #fff; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.t-row:hover .p-nick { color: var(--accent2); }
+.p-country { font-family: 'Barlow Condensed', sans-serif; font-size: 0.64rem; color: rgba(255,255,255,0.22); }
+
+.pts-val { font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 700; color: #fff; }
+.t-row.top-1 .pts-val { background: linear-gradient(180deg, #f7e08a, #c9a84c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; filter: drop-shadow(0 0 6px rgba(232,197,90,0.4)); }
+.s-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--text-dim); }
+
+.t-empty {
+  padding: 4rem;
+  text-align: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ── Scoring system ───────────────────────── */
+.scoring-section { padding: 0 0 3rem; }
+
+.scoring-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.score-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 10px 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  transition: all 0.2s;
+}
+
+.score-item:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+}
+
+.score-top1 { border-color: rgba(232,197,90,0.3); background: rgba(232,197,90,0.08); }
+.score-top2 { border-color: rgba(180,210,240,0.25); background: rgba(180,210,240,0.06); }
+.score-top3 { border-color: rgba(200,140,90,0.25); background: rgba(200,140,90,0.06); }
+
+.score-pos {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  min-width: 22px;
+}
+
+.score-top1 .score-pos { color: #f7e08a; }
+.score-top2 .score-pos { color: #d0e8f5; }
+.score-top3 .score-pos { color: #e0aa7a; }
+
+.score-pts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.score-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+/* ── Torneos ──────────────────────────────── */
+.torneos-section { padding: 0 0 6rem; }
+
+.count-pill {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent2);
+  background: rgba(0,229,255,0.07);
+  border: 1px solid rgba(0,229,255,0.18);
+  padding: 5px 12px;
+  border-radius: 50px;
+}
+
+.to-head {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px 110px;
+  padding: 0.875rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.to-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.85);
+}
+
+.to-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px 110px;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 56px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+
+.to-row:hover { background: rgba(255,255,255,0.04); }
+
+.to-row::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s;
+}
+
+.to-row:hover::before { height: 60%; }
+
+.to-date  { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-faint); }
+.to-name  { font-family: 'Barlow Condensed', sans-serif; font-size: 0.92rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }
+.to-row:hover .to-name { color: var(--accent2); }
+.num-val  { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-dim); }
+.buyin-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--success); }
+.no-val   { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: rgba(255,255,255,0.14); }
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 900px) {
+  .st-head, .t-row { grid-template-columns: 56px 1fr 90px; }
+  .col-tier, .col-stat { display: none; }
+}
+
+@media (max-width: 640px) {
+  .league-header { padding: 1.5rem; }
+  .league-header-top { flex-direction: column; gap: 1.25rem; }
+  .leader-display { text-align: left; }
+  .to-head, .to-row { grid-template-columns: 90px 1fr 80px; }
+  .col-bi { display: none; }
+}
+</style>
+</PublicLayout>

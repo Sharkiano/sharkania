@@ -1,0 +1,228 @@
+---
+// src/pages/admin/ligas/[id].astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { id } = Astro.params;
+if (!id || isNaN(Number(id))) return Astro.redirect('/admin/ligas');
+
+const supabase = createServerClient();
+
+const [{ data: league }, { data: clubs }] = await Promise.all([
+  supabase.from('leagues').select('*').eq('id', Number(id)).single(),
+  supabase.from('clubs').select('id, name').eq('is_active', true).order('name'),
+]);
+
+if (!league) return Astro.redirect('/admin/ligas');
+
+const scoring = (league.scoring_system ?? {}) as {
+  points?: Record<string, number>;
+  participationPoints?: number;
+  bonusBountyPoints?: number;
+};
+
+const defaultPoints: Record<string, number> = { '1':100,'2':80,'3':65,'4':55,'5':45,'6':38,'7':32,'8':27,'9':23,'10':20 };
+const points = scoring.points ?? defaultPoints;
+---
+
+<AdminLayout title={`Editar: ${league.name}`}>
+
+  <div class="page-header">
+    <a href="/admin/ligas" class="btn btn-secondary">← Volver</a>
+    <span class={`status-badge ${league.is_active ? 'status-verified' : 'status-inactive'}`}>
+      {league.is_active ? '✓ Activa' : '✗ Inactiva'}
+    </span>
+  </div>
+
+  <div class="glass-card form-card">
+
+    <h2 class="form-section-title">Información de la Liga</h2>
+    <div class="form-grid">
+
+      <div class="form-group">
+        <label for="name" class="form-label">Nombre de la liga *</label>
+        <input type="text" id="name" class="input-field" value={league.name} maxlength="100" />
+      </div>
+
+      <div class="form-group">
+        <label for="slug" class="form-label">Slug * <span class="label-hint">URL de la liga</span></label>
+        <input type="text" id="slug" class="input-field" value={league.slug} maxlength="100" />
+      </div>
+
+      <div class="form-group">
+        <label for="club_id" class="form-label">Club *</label>
+        <select id="club_id" class="input-field select-field">
+          <option value="">— Seleccionar club —</option>
+          {clubs?.map(c => (
+            <option value={c.id} selected={c.id === league.club_id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-group form-group--full">
+        <label for="description" class="form-label">Descripción</label>
+        <textarea id="description" class="input-field textarea-field" maxlength="500" rows="3">{league.description ?? ''}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="season_start" class="form-label">Inicio de temporada</label>
+        <input type="date" id="season_start" class="input-field" value={league.season_start ?? ''} />
+      </div>
+
+      <div class="form-group">
+        <label for="season_end" class="form-label">Fin de temporada</label>
+        <input type="date" id="season_end" class="input-field" value={league.season_end ?? ''} />
+      </div>
+
+    </div>
+
+    <div class="form-divider"></div>
+    <h2 class="form-section-title">
+      Sistema de Puntaje
+      <span class="optional-label">— puntos por posición</span>
+    </h2>
+
+    <div class="scoring-grid">
+      {[1,2,3,4,5,6,7,8,9,10].map(pos => (
+        <div class="scoring-row">
+          <span class="scoring-pos">
+            {pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `#${pos}`}
+          </span>
+          <input
+            type="number"
+            id={`pts-${pos}`}
+            class="input-field scoring-input"
+            value={points[String(pos)] ?? 0}
+            min="0"
+            max="9999"
+          />
+          <span class="scoring-label">pts</span>
+        </div>
+      ))}
+    </div>
+
+    <div class="form-grid" style="margin-top:1rem;">
+      <div class="form-group">
+        <label for="participation_pts" class="form-label">Puntos por participar</label>
+        <input type="number" id="participation_pts" class="input-field" value={scoring.participationPoints ?? 5} min="0" max="100" />
+      </div>
+      <div class="form-group">
+        <label for="bounty_pts" class="form-label">Puntos por bounty</label>
+        <input type="number" id="bounty_pts" class="input-field" value={scoring.bonusBountyPoints ?? 2} min="0" max="100" />
+      </div>
+    </div>
+
+    <div class="form-error" id="form-error" role="alert"></div>
+
+    <div class="form-actions">
+      <a href="/admin/ligas" class="btn btn-secondary">Cancelar</a>
+      <button class="btn btn-primary" id="btn-guardar">Guardar Cambios</button>
+    </div>
+
+  </div>
+
+</AdminLayout>
+
+<style is:global>
+.scoring-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+.scoring-row  { display: flex; align-items: center; gap: 0.5rem; }
+.scoring-pos  { font-size: 0.9rem; min-width: 32px; text-align: center; font-family: 'JetBrains Mono', monospace; color: #8888a4; }
+.scoring-input { width: 80px; text-align: center; padding: 6px 8px; }
+.scoring-label { font-size: 0.8rem; color: #55556a; }
+</style>
+
+<style is:global>
+.form-card { padding: 2rem; max-width: 800px; }
+.form-section-title { font-size: 1rem; font-weight: 600; color: #e4e4ef; margin: 0 0 1.25rem; }
+.optional-label { font-size: 0.8rem; font-weight: 400; color: #55556a; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+.form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.form-group--full { grid-column: 1 / -1; }
+.form-label { font-size: 0.85rem; font-weight: 500; color: #8888a4; display: flex; align-items: center; gap: 0.5rem; }
+.label-hint { font-size: 0.75rem; color: #55556a; font-weight: 400; }
+.textarea-field { resize: vertical; min-height: 80px; font-family: inherit; }
+.select-field { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
+.form-divider { height: 1px; background: rgba(108, 92, 231, 0.1); margin: 1.5rem 0; }
+.form-error { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-top: 1rem; }
+.form-error.is-visible { display: block; }
+.form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
+.scoring-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; }
+.scoring-row { display: flex; align-items: center; gap: 0.5rem; }
+.scoring-pos { font-size: 0.9rem; min-width: 32px; text-align: center; font-family: 'JetBrains Mono', monospace; color: #8888a4; }
+.scoring-input { width: 80px; text-align: center; padding: 6px 8px; }
+.scoring-label { font-size: 0.8rem; color: #55556a; }
+</style>
+
+<script define:vars={{ leagueId: league.id }}>
+const formError  = document.getElementById('form-error');
+const btnGuardar = document.getElementById('btn-guardar');
+
+btnGuardar?.addEventListener('click', async () => {
+  const name         = document.getElementById('name').value.trim();
+  const slug         = document.getElementById('slug').value.trim();
+  const club_id      = Number(document.getElementById('club_id').value) || null;
+  const description  = document.getElementById('description').value.trim();
+  const season_start = document.getElementById('season_start').value || null;
+  const season_end   = document.getElementById('season_end').value   || null;
+
+  const points = {};
+  for (let i = 1; i <= 10; i++) {
+    points[String(i)] = Number(document.getElementById(`pts-${i}`).value) || 0;
+  }
+
+  const participationPoints = Number(document.getElementById('participation_pts').value) || 0;
+  const bonusBountyPoints   = Number(document.getElementById('bounty_pts').value)        || 0;
+
+  formError.classList.remove('is-visible');
+
+  if (!name || !slug || !club_id) {
+    formError.textContent = 'Nombre, slug y club son requeridos.';
+    formError.classList.add('is-visible');
+    return;
+  }
+
+  btnGuardar.disabled    = true;
+  btnGuardar.textContent = 'Guardando...';
+
+  try {
+    const res = await fetch('/api/admin/ligas', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        id: leagueId,
+        name, slug, club_id, description, season_start, season_end,
+        scoring_system: {
+          type: 'position_based',
+          maxPositionsPaid: 10,
+          points,
+          participationPoints,
+          bonusBountyPoints,
+          bestNof: null,
+        },
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      formError.textContent = data.error ?? 'Error al guardar.';
+      formError.classList.add('is-visible');
+      return;
+    }
+
+    window.location.href = '/admin/ligas';
+  } catch {
+    formError.textContent = 'Error de conexión.';
+    formError.classList.add('is-visible');
+  } finally {
+    btnGuardar.disabled    = false;
+    btnGuardar.textContent = 'Guardar Cambios';
+  }
+});
+</script>

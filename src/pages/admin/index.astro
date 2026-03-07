@@ -1,0 +1,724 @@
+---
+// src/pages/admin/index.astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+// ── Obtener estadísticas en paralelo ────────────────────
+const [
+  { count: totalPlayers },
+  { count: totalTournaments },
+  { count: totalClubs },
+  { count: totalLeagues },
+  { data: recentTournaments },
+  { data: topPlayers },
+] = await Promise.all([
+  supabase.from('players').select('*', { count: 'exact', head: true }),
+  supabase.from('tournaments').select('*', { count: 'exact', head: true }),
+  supabase.from('clubs').select('*', { count: 'exact', head: true }).eq('is_active', true),
+  supabase.from('leagues').select('*', { count: 'exact', head: true }).eq('is_active', true),
+  supabase
+    .from('tournaments')
+    .select('id, name, date, total_players, is_verified, clubs(name)')
+    .order('created_at', { ascending: false })
+    .limit(5),
+  supabase
+    .from('players')
+    .select('id, nickname, slug, elo_rating, total_tournaments, country_id, countries(flag_emoji)')
+    .eq('is_active', true)
+    .order('elo_rating', { ascending: false })
+    .limit(5),
+]);
+
+// ── Torneos pendientes de verificar ─────────────────────
+const { count: pendingVerification } = await supabase
+  .from('tournaments')
+  .select('*', { count: 'exact', head: true })
+  .eq('is_verified', false);
+
+const stats = [
+  { label: 'Jugadores',          value: totalPlayers     ?? 0, icon: '👤', color: 'purple', href: '/admin/jugadores'  },
+  { label: 'Torneos',            value: totalTournaments ?? 0, icon: '🏆', color: 'cyan',   href: '/admin/torneos'    },
+  { label: 'Clubes activos',     value: totalClubs       ?? 0, icon: '🏠', color: 'gold',   href: '/admin/clubes'     },
+  { label: 'Ligas activas',      value: totalLeagues     ?? 0, icon: '📋', color: 'green',  href: '/admin/ligas'      },
+  { label: 'Pendientes verificar', value: pendingVerification ?? 0, icon: '⏳', color: 'warning', href: '/admin/torneos?filter=pending' },
+];
+---
+
+<AdminLayout title="Dashboard">
+
+  <!-- ── Bienvenida ──────────────────────────────────── -->
+  <div class="dashboard-welcome">
+    <div>
+      <h2 class="welcome-title">Panel de Control</h2>
+      <p class="welcome-sub">Resumen general de Sharkania</p>
+    </div>
+    <div class="welcome-actions">
+      <a href="/admin/clubes/nuevo" class="btn btn-secondary">+ Nuevo Club</a>
+      <a href="/admin/ligas/nueva"  class="btn btn-primary">+ Nueva Liga</a>
+    </div>
+  </div>
+
+  <!-- ── Stat Cards ──────────────────────────────────── -->
+  <div class="stats-grid">
+    {stats.map(stat => (
+      <a href={stat.href} class={`stat-card stat-card--${stat.color}`}>
+        <div class="stat-card-icon">{stat.icon}</div>
+        <div class="stat-card-body">
+          <div class={`stat-card-value ${stat.color === 'warning' && stat.value > 0 ? 'stat-card-value--warning' : ''}`}>
+            {stat.value}
+          </div>
+          <div class="stat-card-label">{stat.label}</div>
+        </div>
+        {stat.color === 'warning' && stat.value > 0 && (
+          <div class="stat-card-alert">!</div>
+        )}
+      </a>
+    ))}
+  </div>
+
+  <!-- ── Grid principal ─────────────────────────────── -->
+  <div class="dashboard-grid">
+
+    <!-- Torneos recientes -->
+    <div class="glass-card dashboard-card">
+      <div class="card-header">
+        <h3 class="card-title">🏆 Torneos Recientes</h3>
+        <a href="/admin/torneos" class="card-link">Ver todos →</a>
+      </div>
+      <div class="card-body">
+        {recentTournaments && recentTournaments.length > 0 ? (
+          <table class="poker-table">
+            <thead>
+              <tr>
+                <th>Torneo</th>
+                <th>Club</th>
+                <th>Fecha</th>
+                <th>Jugadores</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTournaments.map(t => (
+                <tr>
+                  <td>
+                    <a href={`/torneo/${t.id}`} class="table-link">{t.name}</a>
+                  </td>
+                  <td class="text-secondary">
+                    {(t.clubs as { name: string } | null)?.name ?? '—'}
+                  </td>
+                  <td class="text-mono text-secondary">{t.date}</td>
+                  <td class="text-mono">{t.total_players}</td>
+                  <td>
+                    {t.is_verified
+                      ? <span class="status-badge status-verified">✓ Verificado</span>
+                      : <span class="status-badge status-pending">⏳ Pendiente</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div class="empty-state">
+            <p>No hay torneos cargados aún.</p>
+            <p class="empty-hint">Los torneos aparecerán aquí cuando los admins de club los suban.</p>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Top jugadores -->
+    <div class="glass-card dashboard-card">
+      <div class="card-header">
+        <h3 class="card-title">⭐ Top Jugadores ELO</h3>
+        <a href="/admin/jugadores" class="card-link">Ver todos →</a>
+      </div>
+      <div class="card-body">
+        {topPlayers && topPlayers.length > 0 ? (
+          <div class="players-list">
+            {topPlayers.map((player, index) => (
+              <div class="player-row">
+                <span class={`rank-badge ${index === 0 ? 'rank-1' : index === 1 ? 'rank-2' : index === 2 ? 'rank-3' : 'rank-default'}`}>
+                  {index + 1}
+                </span>
+                <span class="player-flag">
+                  {(player.countries as { flag_emoji: string } | null)?.flag_emoji ?? '🌎'}
+                </span>
+                <span class="player-nick">{player.nickname}</span>
+                <span class="player-elo">{player.elo_rating ?? 1200}</span>
+                <span class="player-tournaments text-secondary">
+                  {player.total_tournaments} torneos
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <p>No hay jugadores registrados aún.</p>
+            <p class="empty-hint">Los jugadores se crean automáticamente al subir resultados.</p>
+          </div>
+        )}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Accesos rápidos ────────────────────────────── -->
+  <div class="glass-card quick-actions-card">
+    <h3 class="card-title" style="margin-bottom:1rem;">⚡ Accesos Rápidos</h3>
+    <div class="quick-actions-grid">
+      <a href="/admin/clubes/nuevo"      class="quick-action">🏠 Crear Club</a>
+      <a href="/admin/ligas/nueva"       class="quick-action">📋 Crear Liga</a>
+      <a href="/admin/salas"             class="quick-action">🎰 Gestionar Salas</a>
+      <a href="/admin/jugadores"         class="quick-action">👤 Ver Jugadores</a>
+      <a href="/admin/torneos?filter=pending" class="quick-action quick-action--warning">
+        ⏳ Verificar Torneos {pendingVerification ? `(${pendingVerification})` : ''}
+      </a>
+      <a href="/admin/configuracion"     class="quick-action">⚙️ Configuración ELO</a>
+      <button id="btn-recalcular"        class="quick-action quick-action--danger">🔄 Recalcular ELO Global</button>
+    </div>
+  </div>
+
+  <!-- ── Modal confirmación recálculo ──────────────────── -->
+  <div id="modal-recalcular" class="modal-backdrop" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-icon">🔄</div>
+      <h3 class="modal-title">Recalcular ELO Global</h3>
+      <p class="modal-desc">
+        Esta operación recalculará el ELO de <strong>todos los jugadores</strong>
+        desde cero, procesando todos los torneos verificados en orden cronológico.
+      </p>
+      <div class="modal-warning">
+        ⚠️ El proceso puede tardar varios segundos dependiendo del volumen de datos.
+        No cierres esta ventana hasta que termine.
+      </div>
+      <div id="recalc-progress" style="display:none;">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-label" id="progress-label">Procesando...</p>
+      </div>
+      <div id="recalc-result" style="display:none;"></div>
+      <div class="modal-actions" id="modal-actions">
+        <button id="btn-cancel-recalc"  class="btn btn-secondary">Cancelar</button>
+        <button id="btn-confirm-recalc" class="btn btn-danger">Sí, recalcular todo</button>
+      </div>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<script>
+const btnRecalcular = document.getElementById('btn-recalcular');
+const modal         = document.getElementById('modal-recalcular');
+const progressBox   = document.getElementById('recalc-progress');
+const progressFill  = document.getElementById('progress-fill');
+const resultBox     = document.getElementById('recalc-result');
+const modalActions  = document.getElementById('modal-actions');
+
+btnRecalcular?.addEventListener('click', () => {
+  if (modal) modal.style.display = 'flex';
+});
+
+document.getElementById('btn-cancel-recalc')?.addEventListener('click', closeModal);
+
+modal?.addEventListener('click', (e) => {
+  if (e.target === modal) closeModal();
+});
+
+document.getElementById('btn-confirm-recalc')?.addEventListener('click', async () => {
+  if (modalActions) modalActions.style.display = 'none';
+  if (progressBox)  progressBox.style.display  = 'block';
+
+  let pct = 0;
+  const interval = setInterval(() => {
+    pct = Math.min(pct + Math.random() * 8, 90);
+    if (progressFill) progressFill.style.width = pct + '%';
+  }, 400);
+
+  try {
+    const res  = await fetch('/api/admin/recalcular-elo', { method: 'POST' });
+    const data = await res.json();
+
+    clearInterval(interval);
+    if (progressFill) progressFill.style.width = '100%';
+
+    if (data.success) {
+      showResult('success',
+        '✅ Recálculo completado. ' +
+        '<strong>' + data.players_updated + '</strong> jugadores actualizados · ' +
+        '<strong>' + data.tournaments_processed + '</strong> torneos procesados.'
+      );
+    } else {
+      showResult('error', '❌ Error: ' + (data.error ?? 'Error desconocido'));
+    }
+  } catch (err) {
+    clearInterval(interval);
+    showResult('error', '❌ Error de conexión. Intenta nuevamente.');
+  }
+});
+
+function showResult(type: 'success' | 'error', html: string) {
+  if (progressBox) progressBox.style.display = 'none';
+  if (resultBox) {
+    resultBox.innerHTML = html;
+    resultBox.className = 'recalc-result recalc-result--' + type;
+    resultBox.style.display = 'block';
+  }
+  if (modalActions) {
+    modalActions.innerHTML = '<button class="btn btn-secondary" onclick="location.reload()">Cerrar y recargar</button>';
+    modalActions.style.display = 'flex';
+  }
+}
+
+function closeModal() {
+  if (modal)        modal.style.display       = 'none';
+  if (progressBox)  progressBox.style.display = 'none';
+  if (resultBox)    resultBox.style.display   = 'none';
+  if (progressFill) progressFill.style.width  = '0%';
+  if (modalActions) modalActions.style.display = 'flex';
+}
+</script>
+
+<style is:global>
+/* ── Bienvenida ──────────────────────────────── */
+.dashboard-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.welcome-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  margin: 0 0 0.25rem;
+}
+
+.welcome-sub {
+  font-size: 0.875rem;
+  color: #8888a4;
+  margin: 0;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ── Stat Cards ──────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: #12121a;
+  border: 1px solid rgba(108, 92, 231, 0.1);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card:hover {
+  border-color: rgba(108, 92, 231, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.stat-card--purple:hover { border-color: rgba(108, 92, 231, 0.4); }
+.stat-card--cyan:hover   { border-color: rgba(0, 206, 201, 0.4); }
+.stat-card--gold:hover   { border-color: rgba(245, 175, 25, 0.4); }
+.stat-card--green:hover  { border-color: rgba(0, 230, 118, 0.4); }
+.stat-card--warning      { border-color: rgba(255, 215, 64, 0.2); }
+.stat-card--warning:hover { border-color: rgba(255, 215, 64, 0.5); }
+
+.stat-card-icon {
+  font-size: 1.75rem;
+  flex-shrink: 0;
+}
+
+.stat-card-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  line-height: 1;
+}
+
+.stat-card-value--warning {
+  color: #ffd740;
+}
+
+.stat-card-label {
+  font-size: 0.78rem;
+  color: #8888a4;
+  margin-top: 0.2rem;
+}
+
+.stat-card-alert {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  background: #ffd740;
+  color: #000;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Dashboard Grid ──────────────────────────── */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+.dashboard-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.1);
+}
+
+.card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e4e4ef;
+  margin: 0;
+}
+
+.card-link {
+  font-size: 0.8rem;
+  color: #6c5ce7;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.card-link:hover { color: #a855f7; }
+
+.card-body {
+  padding: 0.5rem 0;
+}
+
+/* Tabla dentro de card */
+.dashboard-card .poker-table thead th {
+  padding: 8px 16px;
+  font-size: 0.7rem;
+}
+
+.dashboard-card .poker-table tbody td {
+  padding: 10px 16px;
+  font-size: 0.85rem;
+}
+
+.table-link {
+  color: #e4e4ef;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.table-link:hover { color: #6c5ce7; }
+
+.text-secondary { color: #8888a4; }
+.text-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+
+/* Status badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.status-verified {
+  background: rgba(0, 230, 118, 0.1);
+  color: #00e676;
+  border: 1px solid rgba(0, 230, 118, 0.2);
+}
+
+.status-pending {
+  background: rgba(255, 215, 64, 0.1);
+  color: #ffd740;
+  border: 1px solid rgba(255, 215, 64, 0.2);
+}
+
+/* Empty state */
+.empty-state {
+  padding: 2rem;
+  text-align: center;
+  color: #55556a;
+  font-size: 0.875rem;
+}
+
+.empty-hint {
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+  color: #3d3d52;
+}
+
+/* Players list */
+.players-list {
+  padding: 0.5rem 0;
+}
+
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1.25rem;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: background 0.15s;
+}
+
+.player-row:hover { background: rgba(108, 92, 231, 0.05); }
+.player-row:last-child { border-bottom: none; }
+
+.rank-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.rank-1       { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.rank-2       { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.rank-3       { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.rank-default { background: rgba(255,255,255,0.05); color: #8888a4; }
+
+.player-flag        { font-size: 1rem; flex-shrink: 0; }
+.player-nick        { flex: 1; font-size: 0.875rem; font-weight: 500; color: #e4e4ef; }
+.player-elo         { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #6c5ce7; font-weight: 600; }
+.player-tournaments { font-size: 0.75rem; }
+
+/* Quick actions */
+.quick-actions-card {
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.quick-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(108, 92, 231, 0.08);
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  border-radius: 10px;
+  color: #e4e4ef;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.quick-action:hover {
+  background: rgba(108, 92, 231, 0.18);
+  border-color: rgba(108, 92, 231, 0.35);
+  transform: translateY(-1px);
+}
+
+.quick-action--warning {
+  background: rgba(255, 215, 64, 0.06);
+  border-color: rgba(255, 215, 64, 0.2);
+  color: #ffd740;
+}
+
+.quick-action--warning:hover {
+  background: rgba(255, 215, 64, 0.12);
+  border-color: rgba(255, 215, 64, 0.4);
+}
+
+.quick-action--danger {
+  background: rgba(255, 82, 82, 0.07);
+  border-color: rgba(255, 82, 82, 0.2);
+  color: #ff5252;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.quick-action--danger:hover {
+  background: rgba(255, 82, 82, 0.14);
+  border-color: rgba(255, 82, 82, 0.4);
+}
+
+/* ── Modal recálculo ─────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-box {
+  background: #12121a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  position: relative;
+  overflow: hidden;
+}
+
+.modal-box::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+}
+
+.modal-icon {
+  font-size: 2.5rem;
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.modal-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #e4e4ef;
+  text-align: center;
+  margin: 0 0 0.75rem;
+}
+
+.modal-desc {
+  font-size: 0.875rem;
+  color: #8888a4;
+  text-align: center;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.modal-desc strong { color: #e4e4ef; }
+
+.modal-warning {
+  background: rgba(255,215,64,0.07);
+  border: 1px solid rgba(255,215,64,0.2);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  color: #ffd740;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-danger {
+  background: rgba(255,82,82,0.12);
+  border: 1px solid rgba(255,82,82,0.3);
+  color: #ff5252;
+  padding: 0.6rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover {
+  background: rgba(255,82,82,0.22);
+  border-color: rgba(255,82,82,0.5);
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6c5ce7, #00cec9);
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+
+.progress-label {
+  font-size: 0.8rem;
+  color: #8888a4;
+  text-align: center;
+}
+
+/* Result */
+.recalc-result {
+  padding: 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.recalc-result strong { font-weight: 700; }
+
+.recalc-result--success {
+  background: rgba(0,230,118,0.08);
+  border: 1px solid rgba(0,230,118,0.2);
+  color: #00e676;
+}
+
+.recalc-result--error {
+  background: rgba(255,82,82,0.08);
+  border: 1px solid rgba(255,82,82,0.2);
+  color: #ff5252;
+}
+</style>

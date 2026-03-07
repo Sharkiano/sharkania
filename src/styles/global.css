@@ -1,0 +1,403 @@
+/* src/styles/global.css */
+@import "tailwindcss";
+
+/* ============================================
+   FUENTES
+   ============================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ============================================
+   VARIABLES CSS GLOBALES
+   ============================================ */
+:root {
+  --bg-primary:        #0a0a0f;
+  --bg-secondary:      #12121a;
+  --bg-tertiary:       #1a1a2e;
+  --bg-hover:          #252540;
+  --text-primary:      #e4e4ef;
+  --text-secondary:    #8888a4;
+  --text-muted:        #55556a;
+  --accent-primary:    #6c5ce7;
+  --accent-hover:      #7d6ff0;
+  --accent-secondary:  #00cec9;
+  --success:           #00e676;
+  --danger:            #ff5252;
+  --warning:           #ffd740;
+  --info:              #448aff;
+  --gradient-gold:     linear-gradient(135deg, #f5af19, #f12711);
+  --gradient-purple:   linear-gradient(135deg, #6c5ce7, #a855f7);
+  --gradient-cyan:     linear-gradient(135deg, #00cec9, #6c5ce7);
+  --gradient-dark:     linear-gradient(180deg, #12121a, #0a0a0f);
+}
+
+/* ============================================
+   RESET Y BASE
+   ============================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Números tabulares globalmente */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ============================================
+   GLASSMORPHISM — Cards principales
+   ============================================ */
+.glass-card {
+  background: rgba(26, 26, 46, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  border-color: rgba(108, 92, 231, 0.3);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(108, 92, 231, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform: translateY(-2px);
+}
+
+/* ============================================
+   ELEVACIÓN
+   ============================================ */
+.elevated {
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.3),
+    0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.elevated-high {
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================
+   GLOW EFFECTS
+   ============================================ */
+.glow-purple {
+  box-shadow: 0 0 20px rgba(108, 92, 231, 0.3);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 206, 201, 0.3);
+}
+
+/* ============================================
+   GRADIENT BORDER
+   ============================================ */
+.gradient-border {
+  position: relative;
+  background: var(--bg-secondary);
+  border-radius: 16px;
+}
+
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  padding: 1px;
+  background: linear-gradient(135deg, #6c5ce7, #00cec9);
+  -webkit-mask-composite: destination-out;  /* ← nuevo */
+mask: 
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ============================================
+   TABLA POKER
+   ============================================ */
+.poker-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.poker-table thead th {
+  background: rgba(108, 92, 231, 0.1);
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.2);
+  white-space: nowrap;
+}
+
+.poker-table tbody tr {
+  transition: background 0.2s ease;
+}
+
+.poker-table tbody tr:hover {
+  background: rgba(108, 92, 231, 0.05);
+}
+
+.poker-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+/* ============================================
+   BADGES DE CATEGORÍA ELO
+   ============================================ */
+.elo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.badge-legend {
+  background: linear-gradient(135deg, #f5af19, #f12711);
+  color: #000;
+}
+
+.badge-master {
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+}
+
+.badge-diamond {
+  background: linear-gradient(135deg, #448aff, #00cec9);
+  color: #fff;
+}
+
+.badge-gold {
+  background: linear-gradient(135deg, #ffd740, #f5af19);
+  color: #000;
+}
+
+.badge-silver {
+  background: linear-gradient(135deg, #bdbdbd, #e0e0e0);
+  color: #000;
+}
+
+.badge-bronze {
+  background: linear-gradient(135deg, #a1887f, #d7ccc8);
+  color: #000;
+}
+
+.badge-aspirant {
+  background: rgba(85, 85, 106, 0.4);
+  color: var(--text-secondary);
+  border: 1px solid rgba(85, 85, 106, 0.4);
+}
+
+/* ============================================
+   INDICADORES DE CAMBIO ELO
+   ============================================ */
+.elo-change-positive {
+  color: var(--success);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.elo-change-negative {
+  color: var(--danger);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* ============================================
+   POSITION BADGES
+   ============================================ */
+.pos-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.pos-1 { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.pos-2 { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.pos-3 { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.pos-default { background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); }
+
+/* ============================================
+   INPUTS & FORMS
+   ============================================ */
+.input-field {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(108, 92, 231, 0.2);
+  border-radius: 10px;
+  color: var(--text-primary);
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  outline: none;
+  width: 100%;
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.input-field:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+}
+
+/* ============================================
+   BOTONES
+   ============================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(108, 92, 231, 0.3);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(108, 92, 231, 0.4);
+}
+
+.btn-secondary {
+  background: rgba(108, 92, 231, 0.1);
+  color: var(--accent-primary);
+  border: 1px solid rgba(108, 92, 231, 0.3);
+}
+
+.btn-secondary:hover {
+  background: rgba(108, 92, 231, 0.2);
+}
+
+.btn-danger {
+  background: rgba(255, 82, 82, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(255, 82, 82, 0.3);
+}
+
+.btn-danger:hover {
+  background: rgba(255, 82, 82, 0.2);
+}
+
+/* ============================================
+   SKELETON LOADERS
+   ============================================ */
+@keyframes shimmer {
+  0%   { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03) 25%,
+    rgba(255,255,255,0.07) 50%,
+    rgba(255,255,255,0.03) 75%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+  border-radius: 8px;
+}
+
+/* ============================================
+   SCROLLBAR CUSTOM
+   ============================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(108, 92, 231, 0.4);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(108, 92, 231, 0.7);
+}
+
+/* ============================================
+   UTILIDADES EXTRA
+   ============================================ */
+.stat-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+}
+
+.text-gradient-purple {
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-cyan {
+  background: linear-gradient(135deg, #00cec9, #6c5ce7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

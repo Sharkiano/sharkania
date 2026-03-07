@@ -1,0 +1,552 @@
+---
+// src/pages/admin/jugadores/[id].astro
+import AdminLayout from '@layouts/AdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const { id } = Astro.params;
+if (!id || isNaN(Number(id))) return Astro.redirect('/admin/jugadores');
+
+const supabase = createServerClient();
+
+const [{ data: player }, { data: countries }] = await Promise.all([
+  supabase
+    .from('players')
+    .select(`
+      *,
+      countries ( id, name, flag_emoji ),
+      player_room_nicks ( nickname, rooms ( name ) )
+    `)
+    .eq('id', Number(id))
+    .single(),
+  supabase.from('countries').select('id, name, flag_emoji').order('name'),
+]);
+
+if (!player) return Astro.redirect('/admin/jugadores');
+
+const { data: recentResults } = await supabase
+  .from('tournament_results')
+  .select(`
+    position, prize, currency, elo_change,
+    tournaments ( name, date, total_players, clubs ( name ) )
+  `)
+  .eq('player_id', Number(id))
+  .order('tournaments(date)', { ascending: false })
+  .limit(10);
+
+const country  = player.countries as { id: number; name: string; flag_emoji: string } | null;
+const nicks    = player.player_room_nicks as { nickname: string; rooms: { name: string } | null }[] | null;
+
+function getEloBadge(elo: number) {
+  if (elo >= 1800) return { label: '🏆 Leyenda', class: 'badge-legend' };
+  if (elo >= 1600) return { label: '⭐ Master',   class: 'badge-master' };
+  if (elo >= 1400) return { label: '🔷 Diamante', class: 'badge-diamond' };
+  if (elo >= 1300) return { label: '🥇 Oro',      class: 'badge-gold' };
+  if (elo >= 1200) return { label: '🥈 Plata',    class: 'badge-silver' };
+  if (elo >= 1100) return { label: '🥉 Bronce',   class: 'badge-bronze' };
+  return { label: '📍 Aspirante', class: 'badge-aspirant' };
+}
+
+const badge = getEloBadge(player.elo_rating ?? 1200);
+---
+
+<AdminLayout title={`Jugador: ${player.nickname}`}>
+
+  <div class="page-header">
+    <a href="/admin/jugadores" class="btn btn-secondary">← Volver</a>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <span class={`elo-badge ${badge.class}`}>{badge.label}</span>
+      <span class={`status-badge ${player.is_active ? 'status-verified' : 'status-inactive'}`}>
+        {player.is_active ? '✓ Activo' : '✗ Inactivo'}
+      </span>
+    </div>
+  </div>
+
+  <div class="player-detail-grid">
+
+    <!-- ── Info y edición ─────────────────────────────── -->
+    <div class="glass-card form-card">
+      <h2 class="form-section-title">👤 Información</h2>
+
+      <div class="player-stats-row">
+        <div class="player-stat">
+          <span class="player-stat-value">{player.elo_rating ?? 1200}</span>
+          <span class="player-stat-label">ELO actual</span>
+        </div>
+        <div class="player-stat">
+          <span class="player-stat-value">{player.peak_elo ?? 1200}</span>
+          <span class="player-stat-label">Peak ELO</span>
+        </div>
+        <div class="player-stat">
+          <span class="player-stat-value">{player.total_tournaments ?? 0}</span>
+          <span class="player-stat-label">Torneos</span>
+        </div>
+        <div class="player-stat">
+          <span class="player-stat-value">{player.total_podiums ?? 0}</span>
+          <span class="player-stat-label">Podios</span>
+        </div>
+      </div>
+
+      <div class="form-divider"></div>
+
+      <div class="form-group">
+        <label for="nickname" class="form-label">Nickname</label>
+        <input type="text" id="nickname" class="input-field" value={player.nickname} maxlength="100" />
+      </div>
+
+      <div class="form-group" style="margin-top:1rem;">
+        <label for="country_id" class="form-label">País</label>
+        <select id="country_id" class="input-field select-field">
+          <option value="">— Sin país —</option>
+          {countries?.map(c => (
+            <option value={c.id} selected={c.id === country?.id}>
+              {c.flag_emoji} {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-error" id="form-error" role="alert"></div>
+
+      <div class="form-actions" style="margin-top:1rem;">
+        <button class="btn btn-primary" id="btn-guardar">Guardar Cambios</button>
+      </div>
+
+      <!-- Nicks en salas -->
+      {nicks && nicks.length > 0 && (
+        <div style="margin-top:1.5rem;">
+          <div class="form-divider"></div>
+          <h3 class="form-section-title" style="font-size:0.875rem;">🎰 Nicks por sala</h3>
+          <div class="nicks-list">
+            {nicks.map(n => (
+              <div class="nick-item">
+                <span class="nick-room">{(n.rooms as { name: string } | null)?.name ?? '—'}</span>
+                <span class="nick-value">{n.nickname}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+
+    <!-- ── Fusionar jugadores ──────────────────────────── -->
+    <div class="glass-card merge-card">
+      <h2 class="form-section-title">🔀 Fusionar con otro jugador</h2>
+      <p class="merge-description">
+        Si este jugador tiene otro perfil duplicado, podés fusionarlos.
+        El perfil actual (<strong>{player.nickname}</strong>) se mantendrá y el otro será eliminado.
+      </p>
+
+      <div class="form-group">
+        <label for="merge-search" class="form-label">Buscar jugador a fusionar</label>
+        <input
+          type="text"
+          id="merge-search"
+          class="input-field"
+          placeholder="Escribí el nick del duplicado..."
+          autocomplete="off"
+        />
+        <div class="merge-results" id="merge-results"></div>
+      </div>
+
+      <div class="merge-selected" id="merge-selected" style="display:none;">
+        <div class="merge-preview">
+          <div class="merge-player merge-keep">
+            <span class="merge-label">SE MANTIENE</span>
+            <span class="merge-nick">{player.nickname}</span>
+            <span class="merge-elo">{player.elo_rating ?? 1200} ELO</span>
+          </div>
+          <div class="merge-arrow">→</div>
+          <div class="merge-player merge-eliminate">
+            <span class="merge-label">SE ELIMINA</span>
+            <span class="merge-nick" id="merge-target-nick">—</span>
+            <span class="merge-elo" id="merge-target-elo">—</span>
+          </div>
+        </div>
+        <div class="merge-warning">
+          ⚠️ Esta acción no se puede deshacer. Todos los resultados y nicks del perfil eliminado se transferirán al perfil que se mantiene.
+        </div>
+        <div class="form-actions" style="margin-top:1rem;">
+          <button class="btn btn-secondary" id="btn-cancel-merge">Cancelar</button>
+          <button class="btn btn-danger" id="btn-confirm-merge">Fusionar →</button>
+        </div>
+      </div>
+
+      <div class="form-error" id="merge-error" role="alert"></div>
+      <div class="merge-success" id="merge-success" style="display:none;">
+        ✅ <span id="merge-success-msg"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Historial reciente ─────────────────────────────── -->
+  <div class="glass-card table-card" style="margin-top:1.5rem;">
+    <div class="card-header">
+      <h3 class="card-title">🏆 Últimos torneos</h3>
+    </div>
+    {recentResults && recentResults.length > 0 ? (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Torneo</th>
+            <th>Club</th>
+            <th>Fecha</th>
+            <th>Posición</th>
+            <th>Premio</th>
+            <th>ELO</th>
+          </tr>
+        </thead>
+        <tbody>
+          {recentResults.map(r => {
+            const t = r.tournaments as { name: string; date: string; total_players: number; clubs: { name: string } | null } | null;
+            return (
+              <tr>
+                <td class="tournament-name">{t?.name ?? '—'}</td>
+                <td class="text-secondary">{(t?.clubs as { name: string } | null)?.name ?? '—'}</td>
+                <td class="text-mono text-secondary">{t?.date ?? '—'}</td>
+                <td>
+                  <span class={`pos-badge ${r.position === 1 ? 'pos-1' : r.position === 2 ? 'pos-2' : r.position === 3 ? 'pos-3' : 'pos-default'}`}>
+                    {r.position === 1 ? '🥇' : r.position === 2 ? '🥈' : r.position === 3 ? '🥉' : `#${r.position}`}
+                  </span>
+                </td>
+                <td class="text-mono text-secondary">
+                  {r.prize ? `${r.prize} ${r.currency}` : '—'}
+                </td>
+                <td class="text-mono">
+                  {Number(r.elo_change) !== 0
+                    ? <span style={`color:${Number(r.elo_change) > 0 ? '#00e676' : '#ff5252'}`}>
+                        {Number(r.elo_change) > 0 ? '+' : ''}{r.elo_change}
+                      </span>
+                    : <span class="text-muted">—</span>
+                  }
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    ) : (
+      <div class="empty-state" style="padding:2rem;">No hay torneos registrados.</div>
+    )}
+  </div>
+
+</AdminLayout>
+
+<style is:global>
+/* ── Player detail grid ──────────────────────── */
+.player-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 0;
+}
+
+@media (max-width: 1024px) {
+  .player-detail-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Form card ───────────────────────────────── */
+.form-card         { padding: 1.5rem; }
+.form-section-title { font-size: 1rem; font-weight: 600; color: #e4e4ef; margin: 0 0 1rem; }
+.form-group        { display: flex; flex-direction: column; gap: 0.4rem; }
+.form-label        { font-size: 0.85rem; font-weight: 500; color: #8888a4; }
+.form-divider      { height: 1px; background: rgba(108,92,231,0.1); margin: 1.25rem 0; }
+.form-actions      { display: flex; justify-content: flex-end; gap: 0.75rem; }
+.form-error        { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-top: 0.75rem; }
+.form-error.is-visible { display: block; }
+.select-field      { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
+
+/* ── Player stats row ────────────────────────── */
+.player-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+.player-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem;
+  background: rgba(108,92,231,0.06);
+  border: 1px solid rgba(108,92,231,0.1);
+  border-radius: 10px;
+  gap: 0.25rem;
+}
+
+.player-stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #6c5ce7;
+}
+
+.player-stat-label {
+  font-size: 0.72rem;
+  color: #55556a;
+  text-align: center;
+}
+
+/* ── Nicks list ──────────────────────────────── */
+.nicks-list  { display: flex; flex-direction: column; gap: 0.4rem; }
+.nick-item   { display: flex; align-items: center; gap: 0.75rem; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.nick-room   { font-size: 0.78rem; color: #55556a; min-width: 80px; }
+.nick-value  { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #00cec9; }
+
+/* ── Merge card ──────────────────────────────── */
+.merge-card { padding: 1.5rem; }
+
+.merge-description {
+  font-size: 0.85rem;
+  color: #8888a4;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.merge-results {
+  margin-top: 0.5rem;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(108,92,231,0.1);
+  display: none;
+}
+
+.merge-results.is-open { display: block; }
+
+.merge-result-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.875rem;
+  color: #e4e4ef;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.merge-result-item:last-child { border-bottom: none; }
+.merge-result-item:hover { background: rgba(108,92,231,0.1); }
+.merge-result-elo { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #6c5ce7; }
+
+.merge-preview {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(108,92,231,0.05);
+  border: 1px solid rgba(108,92,231,0.15);
+  border-radius: 10px;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.merge-player {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  min-width: 120px;
+}
+
+.merge-keep      { background: rgba(0,230,118,0.08); border: 1px solid rgba(0,230,118,0.2); }
+.merge-eliminate { background: rgba(255,82,82,0.08);  border: 1px solid rgba(255,82,82,0.2);  }
+
+.merge-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #55556a;
+}
+
+.merge-keep .merge-label      { color: #00e676; }
+.merge-eliminate .merge-label { color: #ff5252; }
+
+.merge-nick  { font-weight: 600; color: #e4e4ef; font-size: 0.9rem; }
+.merge-elo   { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #8888a4; }
+.merge-arrow { font-size: 1.5rem; color: #6c5ce7; }
+
+.merge-warning {
+  font-size: 0.8rem;
+  color: #ffd740;
+  background: rgba(255,215,64,0.06);
+  border: 1px solid rgba(255,215,64,0.15);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.merge-success {
+  margin-top: 0.75rem;
+  padding: 10px 14px;
+  background: rgba(0,230,118,0.1);
+  border: 1px solid rgba(0,230,118,0.2);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #00e676;
+}
+
+/* ── Position badges ─────────────────────────── */
+.pos-badge    { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; padding: 2px 6px; border-radius: 6px; font-size: 0.85rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.pos-1        { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.pos-2        { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.pos-3        { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.pos-default  { background: rgba(255,255,255,0.05); color: #8888a4; }
+
+/* ── Misc ────────────────────────────────────── */
+.page-header     { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem; }
+.table-card      { padding: 0; overflow: hidden; overflow-x: auto; }
+.card-header     { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid rgba(108,92,231,0.1); }
+.card-title      { font-size: 0.95rem; font-weight: 600; color: #e4e4ef; margin: 0; }
+.tournament-name { font-weight: 500; color: #e4e4ef; font-size: 0.875rem; }
+.text-secondary  { color: #8888a4; }
+.text-muted      { color: #55556a; }
+.text-mono       { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.empty-state     { text-align: center; color: #55556a; font-size: 0.875rem; }
+.status-badge    { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+.status-verified { background: rgba(0,230,118,0.1);  color: #00e676; border: 1px solid rgba(0,230,118,0.2);  }
+.status-inactive { background: rgba(85,85,106,0.2);  color: #8888a4; border: 1px solid rgba(85,85,106,0.3);  }
+
+.elo-badge     { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.badge-legend  { background: linear-gradient(135deg, #f5af19, #f12711); color: #000; }
+.badge-master  { background: linear-gradient(135deg, #6c5ce7, #a855f7); color: #fff; }
+.badge-diamond { background: linear-gradient(135deg, #448aff, #00cec9); color: #fff; }
+.badge-gold    { background: linear-gradient(135deg, #ffd740, #f5af19); color: #000; }
+.badge-silver  { background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #000; }
+.badge-bronze  { background: linear-gradient(135deg, #a1887f, #d7ccc8); color: #000; }
+.badge-aspirant { background: rgba(85,85,106,0.3); color: #8888a4; border: 1px solid rgba(85,85,106,0.4); }
+
+.btn-danger {
+  background: linear-gradient(135deg, #ff5252, #d32f2f);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover { opacity: 0.85; transform: translateY(-1px); }
+</style>
+
+<script define:vars={{ playerId: player.id }}>
+// ── Guardar cambios ──────────────────────────────────────
+document.getElementById('btn-guardar')?.addEventListener('click', async () => {
+  const nickname   = document.getElementById('nickname').value.trim();
+  const country_id = Number(document.getElementById('country_id').value) || null;
+  const err        = document.getElementById('form-error');
+
+  err.classList.remove('is-visible');
+  if (!nickname) { err.textContent = 'El nickname es requerido.'; err.classList.add('is-visible'); return; }
+
+  const res  = await fetch('/api/admin/jugadores', {
+    method:  'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ id: playerId, nickname, country_id }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) { err.textContent = data.error ?? 'Error.'; err.classList.add('is-visible'); return; }
+  showToast('Cambios guardados.', 'success');
+});
+
+// ── Buscar jugador para fusionar ─────────────────────────
+let mergeTargetId = null;
+let searchTimeout;
+
+const mergeSearch   = document.getElementById('merge-search');
+const mergeResults  = document.getElementById('merge-results');
+const mergeSelected = document.getElementById('merge-selected');
+
+mergeSearch.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  const q = mergeSearch.value.trim();
+  if (q.length < 2) { mergeResults.classList.remove('is-open'); mergeResults.innerHTML = ''; return; }
+
+  searchTimeout = setTimeout(async () => {
+    const res  = await fetch(`/api/admin/jugadores?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    const filtered = (data.players ?? []).filter(p => p.id !== playerId);
+
+    if (!filtered.length) { mergeResults.classList.remove('is-open'); return; }
+
+    mergeResults.innerHTML = filtered.map(p => `
+      <div class="merge-result-item"
+        data-id="${p.id}"
+        data-nick="${p.nickname}"
+        data-elo="${p.elo_rating ?? 1200}"
+        onclick="selectMergeTarget(this)"
+      >
+        <span>${p.nickname}</span>
+        <span class="merge-result-elo">${p.elo_rating ?? 1200} ELO</span>
+      </div>
+    `).join('');
+    mergeResults.classList.add('is-open');
+  }, 300);
+});
+
+function selectMergeTarget(el) {
+  mergeTargetId = Number(el.dataset.id);
+  document.getElementById('merge-target-nick').textContent = el.dataset.nick ?? '—';
+  document.getElementById('merge-target-elo').textContent  = `${el.dataset.elo} ELO`;
+  mergeResults.classList.remove('is-open');
+  mergeResults.innerHTML      = '';
+  mergeSearch.value           = '';
+  mergeSelected.style.display = 'block';
+}
+
+document.getElementById('btn-cancel-merge')?.addEventListener('click', () => {
+  mergeTargetId               = null;
+  mergeSelected.style.display = 'none';
+});
+
+document.getElementById('btn-confirm-merge')?.addEventListener('click', async () => {
+  if (!mergeTargetId) return;
+  const mergeErr = document.getElementById('merge-error');
+  mergeErr.classList.remove('is-visible');
+  if (!confirm('¿Confirmar fusión? Esta acción no se puede deshacer.')) return;
+
+  const btn = document.getElementById('btn-confirm-merge');
+  btn.disabled    = true;
+  btn.textContent = 'Fusionando...';
+
+  try {
+    const res  = await fetch('/api/admin/jugadores', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'merge', keep_id: playerId, merge_id: mergeTargetId }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      mergeErr.textContent = data.error ?? 'Error al fusionar.';
+      mergeErr.classList.add('is-visible');
+      return;
+    }
+
+    mergeSelected.style.display = 'none';
+    const successEl = document.getElementById('merge-success');
+    document.getElementById('merge-success-msg').textContent = data.message ?? 'Fusión exitosa.';
+    successEl.style.display = 'block';
+    setTimeout(() => window.location.reload(), 2000);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Fusionar →';
+  }
+});
+
+function showToast(msg, type) {
+  const toast = document.createElement('div');
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;padding:12px 20px;border-radius:10px;font-size:0.875rem;font-weight:500;z-index:2000;';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+window.selectMergeTarget = selectMergeTarget;
+</script>
