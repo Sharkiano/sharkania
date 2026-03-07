@@ -1,0 +1,320 @@
+---
+// src/pages/club-admin/calendario.astro
+import ClubAdminLayout from '@layouts/ClubAdminLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const adminProfile = Astro.locals.adminProfile;
+if (!adminProfile?.club_id) return Astro.redirect('/club-admin/login');
+
+const supabase = createServerClient();
+
+const [{ data: events }, { data: leagues }, { data: rooms }, { data: club }] = await Promise.all([
+  supabase
+    .from('scheduled_tournaments')
+    .select('id, name, scheduled_date, scheduled_time, buy_in, currency, details, leagues ( name ), rooms ( name )')
+    .eq('club_id', adminProfile.club_id)
+    .eq('is_active', true)
+    .order('scheduled_date', { ascending: true }),
+  supabase.from('leagues').select('id, name').eq('club_id', adminProfile.club_id).eq('is_active', true).order('name'),
+  supabase.from('rooms').select('id, name').eq('is_active', true).order('name'),
+  supabase.from('clubs').select('name, countries ( name, timezone )').eq('id', adminProfile.club_id).single(),
+]);
+
+const clubTimezone    = (club?.countries as any)?.timezone ?? 'UTC';
+const clubCountryName = (club?.countries as any)?.name ?? '';
+---
+
+<ClubAdminLayout title="Calendario" clubName={(club as any)?.name ?? 'Mi Club'}>
+
+  <div class="page-header">
+    <div></div>
+    <button class="btn btn-primary" id="btn-nuevo">+ Nuevo Torneo</button>
+  </div>
+
+  <div class="glass-card table-card">
+    {events && events.length > 0 ? (
+      <table class="poker-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Hora</th>
+            <th>Torneo</th>
+            <th>Liga</th>
+            <th>Buy-in</th>
+            <th>Sala</th>
+            <th>Info</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(events as any[]).map((e) => {
+            const league  = e.leagues as { name: string } | null;
+            const room    = e.rooms   as { name: string } | null;
+            const dateStr = new Date(e.scheduled_date + 'T12:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+            return (
+              <tr>
+                <td class="text-mono">{dateStr}</td>
+                <td class="text-mono text-secondary">
+                  {e.scheduled_time ? e.scheduled_time.slice(0,5) : '—'}
+                </td>
+                <td style="font-weight:500;color:#e4e4ef;">{e.name}</td>
+                <td class="text-secondary">{league?.name ?? <span class="text-muted">Sin liga</span>}</td>
+                <td class="text-mono text-secondary">{e.buy_in ? `${e.buy_in} ${e.currency}` : '—'}</td>
+                <td class="text-secondary">{room?.name ?? '—'}</td>
+                <td>
+                  {e.details && (
+                    <button
+                      class="action-btn"
+                      data-details={e.details}
+                      data-name={e.name}
+                      onclick="openInfoModal(this)"
+                      aria-label="Ver detalles"
+                    >ℹ️</button>
+                  )}
+                </td>
+                <td>
+                  <button
+                    class="action-btn action-btn--danger"
+                    data-id={String(e.id)}
+                    onclick="deleteEvent(this)"
+                    aria-label="Eliminar"
+                  >🗑</button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    ) : (
+      <div class="empty-state" style="padding:3rem;">
+        <p style="font-size:2rem;margin:0;">📅</p>
+        <p>No hay torneos programados.</p>
+        <button class="btn btn-primary" style="margin-top:0.75rem;" id="btn-nuevo-empty">+ Crear primer torneo</button>
+      </div>
+    )}
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Modal nuevo torneo -->
+  <div class="modal-overlay" id="event-modal" style="display:none;">
+    <div class="modal-box glass-card">
+      <h3 class="modal-title">Nuevo Torneo en Calendario</h3>
+
+      <div class="form-grid" style="margin-top:1.25rem;">
+
+        <div class="form-group form-group--full">
+          <label class="form-label">Nombre del torneo *</label>
+          <input type="text" id="ev-name" class="input-field" placeholder="Ej: Liga Semanal #12" maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Liga <span class="label-hint">opcional</span></label>
+          <select id="ev-league" class="input-field select-field">
+            <option value="">— Sin liga —</option>
+            {leagues?.map(l => <option value={l.id}>{l.name}</option>)}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Fecha *</label>
+          <input type="date" id="ev-date" class="input-field" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Hora <span class="label-hint">opcional</span></label>
+          <input type="time" id="ev-time" class="input-field" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Zona horaria del torneo</label>
+          <div class="tz-info-box">🕐 Hora {clubCountryName} — <code>{clubTimezone}</code></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Sala <span class="label-hint">opcional</span></label>
+          <select id="ev-room" class="input-field select-field">
+            <option value="">— Seleccionar —</option>
+            {rooms?.map(r => <option value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Buy-in <span class="label-hint">opcional</span></label>
+          <input type="number" id="ev-buyin" class="input-field" placeholder="0.00" min="0" step="0.01" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Moneda</label>
+          <select id="ev-currency" class="input-field select-field">
+            <option value="USD">USD — Dólar</option>
+            <option value="ARS">ARS — Peso Arg.</option>
+            <option value="CLP">CLP — Peso Chi.</option>
+            <option value="MXN">MXN — Peso Mex.</option>
+            <option value="COP">COP — Peso Col.</option>
+            <option value="PEN">PEN — Sol</option>
+            <option value="BRL">BRL — Real</option>
+            <option value="EUR">EUR — Euro</option>
+            <option value="UYU">UYU — Peso Uru.</option>
+          </select>
+        </div>
+
+        <div class="form-group form-group--full">
+          <label class="form-label">
+            Detalles adicionales
+            <span class="label-hint">stack, niveles de ciegas, late reg, etc.</span>
+          </label>
+          <textarea id="ev-details" class="input-field textarea-field" rows="4" maxlength="1000"
+            placeholder="Ej: Stack inicial: 20.000 fichas&#10;Niveles: 15 minutos&#10;Late reg: 6 niveles"></textarea>
+        </div>
+
+      </div>
+
+      <div class="form-error" id="ev-error" role="alert"></div>
+
+      <div class="form-actions" style="margin-top:1.25rem;">
+        <button class="btn btn-secondary" onclick="closeEventModal()">Cancelar</button>
+        <button class="btn btn-primary" id="ev-save-btn" onclick="saveEvent()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal info detalles -->
+  <div class="modal-overlay" id="info-modal" style="display:none;" onclick="closeInfoOutside(event)">
+    <div class="modal-box glass-card" style="max-width:480px;" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <h3 class="modal-title" id="info-modal-title"></h3>
+        <button class="action-btn" onclick="closeInfoModal()">✕</button>
+      </div>
+      <p class="info-modal-body" id="info-modal-body"></p>
+    </div>
+  </div>
+
+</ClubAdminLayout>
+
+<style is:global>
+.form-grid        { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+.form-group       { display: flex; flex-direction: column; gap: 0.4rem; }
+.form-group--full { grid-column: 1 / -1; }
+.form-label       { font-size: 0.85rem; font-weight: 500; color: #8888a4; display: flex; align-items: center; gap: 0.5rem; }
+.label-hint       { font-size: 0.75rem; color: #55556a; font-weight: 400; }
+.textarea-field   { resize: vertical; min-height: 90px; }
+.select-field     { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
+.form-error       { display: none; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; color: #ff5252; margin-top: 0.5rem; }
+.form-error.is-visible { display: block; }
+.form-actions     { display: flex; justify-content: flex-end; gap: 0.75rem; }
+.modal-overlay    { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+.modal-box        { width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; padding: 1.75rem; }
+.modal-title      { font-size: 1.1rem; font-weight: 700; color: #e4e4ef; margin: 0; }
+.info-modal-body  { font-size: 0.875rem; color: #8888a4; line-height: 1.7; white-space: pre-wrap; margin: 0; }
+.tz-info-box      { padding: 8px 12px; background: rgba(68,138,255,0.08); border: 1px solid rgba(68,138,255,0.2); border-radius: 8px; font-size: 0.82rem; color: #8888a4; }
+.tz-info-box code { color: #448aff; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+document.getElementById('btn-nuevo')?.addEventListener('click', () => {
+  (document.getElementById('event-modal') as HTMLElement).style.display = 'flex';
+});
+document.getElementById('btn-nuevo-empty')?.addEventListener('click', () => {
+  (document.getElementById('event-modal') as HTMLElement).style.display = 'flex';
+});
+
+function closeEventModal() {
+  (document.getElementById('event-modal') as HTMLElement).style.display = 'none';
+}
+
+async function saveEvent() {
+  const name      = (document.getElementById('ev-name')     as HTMLInputElement).value.trim();
+  const date      = (document.getElementById('ev-date')     as HTMLInputElement).value;
+  const time      = (document.getElementById('ev-time')     as HTMLInputElement).value || null;
+  const league_id = Number((document.getElementById('ev-league')   as HTMLSelectElement).value) || null;
+  const room_id   = Number((document.getElementById('ev-room')     as HTMLSelectElement).value) || null;
+  const buy_in    = parseFloat((document.getElementById('ev-buyin') as HTMLInputElement).value) || null;
+  const currency  = (document.getElementById('ev-currency') as HTMLSelectElement).value;
+  const details   = (document.getElementById('ev-details')  as HTMLTextAreaElement).value.trim() || null;
+  const err       = document.getElementById('ev-error')     as HTMLDivElement;
+  const saveBtn   = document.getElementById('ev-save-btn')  as HTMLButtonElement;
+
+  err.classList.remove('is-visible');
+
+  if (!name) { err.textContent = 'El nombre es requerido.'; err.classList.add('is-visible'); return; }
+  if (!date) { err.textContent = 'La fecha es requerida.';  err.classList.add('is-visible'); return; }
+
+  saveBtn.disabled    = true;
+  saveBtn.textContent = 'Guardando...';
+
+  try {
+    const res  = await fetch('/api/club-admin/calendario', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, scheduled_date: date, scheduled_time: time, league_id, room_id, buy_in, currency, details }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      err.textContent = data.error ?? 'Error al guardar.';
+      err.classList.add('is-visible');
+      return;
+    }
+
+    showToast('Torneo agregado al calendario.', 'success');
+    closeEventModal();
+    setTimeout(() => window.location.reload(), 800);
+  } catch {
+    err.textContent = 'Error de conexión.';
+    err.classList.add('is-visible');
+  } finally {
+    saveBtn.disabled    = false;
+    saveBtn.textContent = 'Guardar';
+  }
+}
+
+async function deleteEvent(btn: HTMLElement) {
+  if (!confirm('¿Eliminar este torneo del calendario?')) return;
+  const id = btn.dataset.id!;
+  (btn as HTMLButtonElement).disabled = true;
+  try {
+    const res  = await fetch('/api/club-admin/calendario', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: Number(id) }),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok || data.error) { showToast(data.error ?? 'Error.', 'error'); return; }
+    btn.closest('tr')?.remove();
+    showToast('Torneo eliminado.', 'success');
+  } catch {
+    showToast('Error de conexión.', 'error');
+  } finally {
+    (btn as HTMLButtonElement).disabled = false;
+  }
+}
+
+function openInfoModal(btn: HTMLElement) {
+  (document.getElementById('info-modal-title') as HTMLElement).textContent = btn.dataset.name ?? '';
+  (document.getElementById('info-modal-body')  as HTMLElement).textContent = btn.dataset.details ?? '';
+  (document.getElementById('info-modal') as HTMLElement).style.display = 'flex';
+}
+function closeInfoModal() {
+  (document.getElementById('info-modal') as HTMLElement).style.display = 'none';
+}
+function closeInfoOutside(e: MouseEvent) {
+  if ((e.target as HTMLElement).id === 'info-modal') closeInfoModal();
+}
+
+function showToast(msg: string, type: 'success' | 'error') {
+  const toast = document.getElementById('toast')!;
+  toast.textContent = msg;
+  toast.className   = `toast toast--${type} is-visible`;
+  setTimeout(() => toast.classList.remove('is-visible'), 3000);
+}
+
+(window as any).closeEventModal  = closeEventModal;
+(window as any).saveEvent        = saveEvent;
+(window as any).deleteEvent      = deleteEvent;
+(window as any).openInfoModal    = openInfoModal;
+(window as any).closeInfoModal   = closeInfoModal;
+(window as any).closeInfoOutside = closeInfoOutside;
+</script>

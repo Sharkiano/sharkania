@@ -1,0 +1,369 @@
+---
+// src/pages/calendario.astro
+import PublicLayout from '@layouts/PublicLayout.astro';
+import { createServerClient } from '@lib/supabase/server';
+
+const supabase = createServerClient();
+
+const { data: events } = await supabase
+  .from('scheduled_tournaments')
+  .select(`
+    id, name, scheduled_date, scheduled_time, timezone, buy_in, currency, details,
+    clubs ( id, name, slug, countries ( name, timezone ) ),
+    leagues ( id, name, slug ),
+    rooms ( name )
+  `)
+  .eq('is_active', true)
+  .gte('scheduled_date', new Date().toISOString().split('T')[0])
+  .order('scheduled_date', { ascending: true })
+  .limit(100);
+---
+
+<PublicLayout
+  title="Calendario de Torneos — Sharkania"
+  description="Próximos torneos de póker online en Sharkania. Consultá fechas, horarios y detalles."
+>
+
+<section class="cal-section">
+  <div class="section-wrap">
+
+    <div class="section-head">
+      <div>
+        <div class="section-eyebrow">PRÓXIMOS EVENTOS</div>
+        <div class="section-title">CALENDARIO DE TORNEOS</div>
+      </div>
+    </div>
+
+    {events && events.length > 0 ? (
+      <div class="table-crystal">
+        <div class="cal-head">
+          <span>FECHA Y HORA</span>
+          <span>TORNEO</span>
+          <span>CLUB</span>
+          <span class="col-league">LIGA</span>
+          <span class="col-buyin">BUY-IN</span>
+          <span class="col-sala">SALA</span>
+          <span class="col-info">INFO</span>
+        </div>
+        <div class="t-body">
+          {(events as any[]).map((e) => {
+            const club    = e.clubs;
+            const country = club?.countries ?? null;
+            const league  = e.leagues;
+            const room    = e.rooms;
+            const tz      = country?.timezone ?? e.timezone ?? 'UTC';
+            const tzLabel = country?.name ?? '';
+            const dateStr = new Date(e.scheduled_date + 'T12:00:00').toLocaleDateString('es-ES', {
+              weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+            });
+            const hasTime     = !!e.scheduled_time;
+            const isoDateTime = hasTime ? `${e.scheduled_date}T${e.scheduled_time}` : null;
+
+            return (
+              <div class="cal-row">
+
+                <div class="cal-date">
+                  <span class="date-val">{dateStr}</span>
+                  {hasTime && (
+                    <span class="time-val">
+                      {e.scheduled_time.slice(0, 5)}
+                      {tzLabel && <span class="tz-label">({tzLabel})</span>}
+                    </span>
+                  )}
+                  {hasTime && (
+                    <span
+                      class="countdown"
+                      data-datetime={isoDateTime}
+                      data-tz={tz}
+                    ></span>
+                  )}
+                </div>
+
+                <div class="cal-name">{e.name}</div>
+
+                <div>
+                  {club
+                    ? <a href={`/club/${club.slug}`} class="cal-link">{club.name}</a>
+                    : <span class="cal-muted">—</span>
+                  }
+                </div>
+
+                <div class="col-league">
+                  {league
+                    ? <a href={`/rankings/${league.slug}`} class="cal-link cal-link--league">{league.name}</a>
+                    : <span class="cal-muted">—</span>
+                  }
+                </div>
+
+                <div class="col-buyin">
+                  {e.buy_in
+                    ? <span class="buyin-val">{e.buy_in} {e.currency}</span>
+                    : <span class="cal-muted">—</span>
+                  }
+                </div>
+
+                <div class="col-sala cal-dim">{room?.name ?? '—'}</div>
+
+                <div class="col-info">
+                  {e.details && (
+                    <button
+                      class="info-btn"
+                      data-details={e.details}
+                      data-name={e.name}
+                      onclick="openInfo(this)"
+                      aria-label="Ver detalles"
+                    >ℹ️</button>
+                  )}
+                </div>
+
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : (
+      <div class="empty-cal">
+        <p style="font-size:2.5rem;margin:0;">📅</p>
+        <p>No hay torneos programados próximamente.</p>
+      </div>
+    )}
+
+  </div>
+</section>
+
+<!-- Modal info -->
+<div class="info-modal-overlay" id="info-modal" style="display:none;" onclick="closeInfoOutside(event)">
+  <div class="info-modal-box table-crystal" onclick="event.stopPropagation()">
+    <div class="info-modal-header">
+      <h3 id="info-modal-title"></h3>
+      <button class="info-close-btn" onclick="closeInfoBtn()">✕</button>
+    </div>
+    <div class="info-modal-body" id="info-modal-body"></div>
+  </div>
+</div>
+
+</PublicLayout>
+
+<style>
+.cal-section { padding: 5rem 0 6rem; }
+
+.cal-head {
+  display: grid;
+  grid-template-columns: 210px 1fr 160px 150px 120px 110px 50px;
+  padding: 1rem 1.5rem;
+  background: rgba(41,121,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.cal-head span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(0,229,255,0.4);
+}
+
+.cal-row {
+  display: grid;
+  grid-template-columns: 210px 1fr 160px 150px 120px 110px 50px;
+  align-items: center;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.2s;
+}
+.cal-row:hover { background: rgba(255,255,255,0.04); }
+
+.cal-date  { display: flex; flex-direction: column; gap: 3px; }
+
+.date-val {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.88rem; font-weight: 700;
+  color: #fff; letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.time-val {
+  font-size: 0.8rem;
+  color: rgba(0,229,255,0.85);
+  font-family: 'JetBrains Mono', monospace;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+
+.tz-label {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.35);
+  font-family: 'Barlow Condensed', sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.countdown {
+  font-size: 0.68rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #ffd740;
+  letter-spacing: 0.02em;
+  min-height: 1em;
+}
+.countdown.started { color: #00e676; }
+.countdown.soon    { color: #ff5252; animation: blink 1s infinite; }
+
+@keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+.cal-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1rem; font-weight: 600;
+  color: #fff; letter-spacing: 0.03em;
+}
+
+.cal-link { color: #6c5ce7; text-decoration: none; font-size: 0.85rem; transition: color 0.2s; }
+.cal-link:hover { color: #00cec9; }
+.cal-link--league { color: #00cec9; }
+.cal-link--league:hover { color: #6c5ce7; }
+
+.buyin-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #ffd740; }
+.cal-dim   { font-size: 0.82rem; color: rgba(255,255,255,0.35); }
+.cal-muted { color: rgba(255,255,255,0.2); font-size: 0.82rem; }
+
+.info-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 1.1rem; padding: 4px; border-radius: 6px;
+  transition: transform 0.2s;
+}
+.info-btn:hover { transform: scale(1.2); }
+
+.empty-cal {
+  text-align: center; color: rgba(255,255,255,0.3);
+  padding: 5rem 0;
+  font-family: 'Barlow Condensed', sans-serif;
+  letter-spacing: 0.1em;
+  display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+}
+
+/* Modal */
+.info-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; backdrop-filter: blur(6px);
+}
+.info-modal-box {
+  width: 100%; max-width: 500px;
+  padding: 1.75rem;
+  background: rgba(2,11,30,0.97);
+}
+.info-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 1rem;
+}
+.info-modal-header h3 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.1rem; font-weight: 700;
+  color: #fff; letter-spacing: 0.05em; margin: 0;
+}
+.info-close-btn {
+  background: none; border: none;
+  color: rgba(255,255,255,0.4); font-size: 1rem;
+  cursor: pointer; padding: 4px 8px; border-radius: 6px;
+  transition: color 0.2s;
+}
+.info-close-btn:hover { color: #fff; }
+.info-modal-body {
+  font-size: 0.875rem;
+  color: rgba(255,255,255,0.6);
+  line-height: 1.7; white-space: pre-wrap;
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .cal-head, .cal-row {
+    grid-template-columns: 190px 1fr 140px 50px;
+  }
+  .col-league, .col-buyin, .col-sala { display: none; }
+}
+@media (max-width: 640px) {
+  .cal-head, .cal-row {
+    grid-template-columns: 150px 1fr 50px;
+  }
+}
+</style>
+
+<script>
+function parseTzDate(datetimeLocal: string, tz: string): number {
+  const [datePart, timePart] = datetimeLocal.split('T');
+  const [year, month, day]   = datePart.split('-').map(Number);
+  const [hour, minute]       = timePart.split(':').map(Number);
+
+  const probe = new Date(Date.UTC(year, month - 1, day, hour, minute));
+
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(fmt.formatToParts(probe).map(p => [p.type, p.value]));
+
+  const utcEquiv = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second)
+  );
+
+  return probe.getTime() - (utcEquiv - probe.getTime());
+}
+
+function updateCountdowns() {
+  const els = document.querySelectorAll<HTMLElement>('.countdown[data-datetime]');
+  const now = Date.now();
+
+  els.forEach(el => {
+    const dt     = el.dataset.datetime!;
+    const tz     = el.dataset.tz ?? 'UTC';
+    const target = parseTzDate(dt, tz);
+    const diff   = target - now;
+
+    el.classList.remove('started', 'soon');
+
+    if (diff <= 0) {
+      el.textContent = '🟢 En curso';
+      el.classList.add('started');
+      return;
+    }
+
+    const days  = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    const mins  = Math.floor((diff % 3600000)  / 60000);
+    const secs  = Math.floor((diff % 60000)    / 1000);
+
+    if (days > 0) {
+      el.textContent = `⏳ ${days}d ${hours}h`;
+    } else if (hours > 0) {
+      el.textContent = `⏳ ${hours}h ${mins}m`;
+    } else {
+      el.textContent = `⚡ ${mins}m ${secs}s`;
+      el.classList.add('soon');
+    }
+  });
+}
+
+updateCountdowns();
+setInterval(updateCountdowns, 1000);
+
+function openInfo(btn: HTMLElement) {
+  (document.getElementById('info-modal-title') as HTMLElement).textContent = btn.dataset.name ?? '';
+  (document.getElementById('info-modal-body')  as HTMLElement).textContent = btn.dataset.details ?? '';
+  (document.getElementById('info-modal') as HTMLElement).style.display = 'flex';
+}
+function closeInfoBtn() {
+  (document.getElementById('info-modal') as HTMLElement).style.display = 'none';
+}
+function closeInfoOutside(e: MouseEvent) {
+  if ((e.target as HTMLElement).id === 'info-modal') closeInfoBtn();
+}
+
+(window as any).openInfo         = openInfo;
+(window as any).closeInfoBtn     = closeInfoBtn;
+(window as any).closeInfoOutside = closeInfoOutside;
+</script>

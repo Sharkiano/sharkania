@@ -88,9 +88,10 @@ const titleFull  = title.includes('Sharkania') ? title : `${title} — Sharkania
     </a>
 
     <ul class="nav-links">
-      <li><a href="/"               class={path === '/'                ? 'active' : ''}>INICIO</a></li>
+      <li><a href="/"                class={path === '/'                ? 'active' : ''}>INICIO</a></li>
       <li><a href="/rankings/global" class={path === '/rankings/global' ? 'active' : ''}>RANKING GLOBAL</a></li>
-      <li><a href="/torneos"         class={path === '/torneos'         ? 'active' : ''}>TORNEOS</a></li>
+      <li><a href="/calendario"      class={path === '/calendario'      ? 'active' : ''}>CALENDARIO</a></li>
+      <li><a href="/torneos"         class={path === '/torneos'         ? 'active' : ''}>HISTORIAL</a></li>
       <li><a href="/ligas"           class={path === '/ligas'           ? 'active' : ''}>LIGAS</a></li>
       <li><a href="/clubes"          class={path === '/clubes'          ? 'active' : ''}>CLUBES</a></li>
       <li><a href="/comparar"        class={path === '/comparar'        ? 'active' : ''}>COMPARADOR</a></li>
@@ -131,9 +132,10 @@ const titleFull  = title.includes('Sharkania') ? title : `${title} — Sharkania
 
   <!-- Mobile menu -->
   <div class="nav-mobile-menu" id="nav-mobile">
-    <a href="/"               onclick="closeMobileMenu()">INICIO</a>
+    <a href="/"                onclick="closeMobileMenu()">INICIO</a>
     <a href="/rankings/global" onclick="closeMobileMenu()">RANKING GLOBAL</a>
-    <a href="/torneos"         onclick="closeMobileMenu()">TORNEOS</a>
+    <a href="/calendario"      onclick="closeMobileMenu()">CALENDARIO</a>
+    <a href="/torneos"         onclick="closeMobileMenu()">HISTORIAL</a>
     <a href="/ligas"           onclick="closeMobileMenu()">LIGAS</a>
     <a href="/clubes"          onclick="closeMobileMenu()">CLUBES</a>
     <a href="/comparar"        onclick="closeMobileMenu()">COMPARADOR</a>
@@ -158,7 +160,8 @@ const titleFull  = title.includes('Sharkania') ? title : `${title} — Sharkania
       <div class="footer-links">
         <a href="/">Inicio</a>
         <a href="/rankings/global">Ranking Global</a>
-        <a href="/torneos">Torneos</a>
+        <a href="/calendario">Calendario</a>
+        <a href="/torneos">Historial</a>
         <a href="/ligas">Ligas</a>
         <a href="/clubes">Clubes</a>
         <a href="/buscar">Buscar</a>
