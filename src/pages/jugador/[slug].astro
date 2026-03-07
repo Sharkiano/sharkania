@@ -1,6 +1,7 @@
 ---
 // src/pages/jugador/[slug].astro
 import PublicLayout from '@layouts/PublicLayout.astro';
+import CountryFlag from '@components/CountryFlag.astro';
 import { createServerClient } from '@lib/supabase/server';
 import { getEloCategory } from '@lib/elo/calculator';
 
@@ -122,10 +123,13 @@ function eloChangeText(change: number) {
         <div class="player-identity">
           <div class="player-meta-top">
             {country && (
-              <span class="player-flag-country">
-                {country.flag_emoji} {country.name}
-              </span>
-            )}
+  <span class="player-flag-country">
+    {country.code ? (
+      <CountryFlag countryCode={country.code} size={18} />
+    ) : null}
+    {country.name}
+  </span>
+)}
             <span class={`tier ${
               player.elo_rating >= 1800 ? 'tier-legend'  :
               player.elo_rating >= 1600 ? 'tier-master'  :

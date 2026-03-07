@@ -1,6 +1,7 @@
 ---
 // src/pages/ligas.astro
 import PublicLayout from '@layouts/PublicLayout.astro';
+import CountryFlag from '@components/CountryFlag.astro';
 import { createServerClient } from '@lib/supabase/server';
 
 const supabase = createServerClient();
@@ -9,7 +10,7 @@ const { data: ligas } = await supabase
   .from('leagues')
   .select(`
     id, name, slug, description, season_start, season_end,
-    clubs ( name, slug, countries ( name, flag_emoji ) )
+    clubs ( name, slug, countries ( name, flag_emoji, code ) )
   `)
   .eq('is_active', true)
   .order('name', { ascending: true });
@@ -46,6 +47,7 @@ type Liga = {
   clubSlug: string;
   countryFlag: string;
   countryName: string;
+  countryCode: string;
   torneos: number;
   jugadores: number;
 };
@@ -64,6 +66,7 @@ const processed: Liga[] = (ligas ?? []).map((l: any) => {
     clubSlug:    club?.slug  ?? '',
     countryFlag: country?.flag_emoji ?? '',
     countryName: country?.name ?? '',
+    countryCode: country?.code ?? '',
     torneos:     torneoMap.get(l.id) ?? 0,
     jugadores:   playerMap.get(l.id) ?? 0,
   };
@@ -104,9 +107,12 @@ function fmtSeason(start: string | null, end: string | null) {
             <div class="lc-top">
               <div class="lc-icon">🏆</div>
               <div class="lc-meta">
-                {l.countryFlag && (
-                  <span class="lc-country">{l.countryFlag} {l.countryName}</span>
-                )}
+                {l.countryCode && (
+  <span class="lc-country">
+    <CountryFlag countryCode={l.countryCode} size={16} />
+    {l.countryName}
+  </span>
+)}
                 {fmtSeason(l.seasonStart, l.seasonEnd) && (
                   <span class="lc-season">{fmtSeason(l.seasonStart, l.seasonEnd)}</span>
                 )}

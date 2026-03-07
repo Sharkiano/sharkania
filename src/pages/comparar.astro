@@ -1,6 +1,7 @@
 ---
 // src/pages/comparar.astro
 import PublicLayout from '@layouts/PublicLayout.astro';
+import CountryFlag from '@components/CountryFlag.astro';
 import { createServerClient } from '@lib/supabase/server';
 
 const supabase = createServerClient();
@@ -14,7 +15,7 @@ type PlayerFull = {
   total_tournaments: number; total_first_places: number;
   total_podiums: number; total_final_tables: number;
   first_seen: string | null; last_seen: string | null;
-  countries: { name: string; flag_emoji: string } | null;
+  countries: { name: string; code: string; flag_emoji: string } | null; 
 };
 
 type TournamentResult = {
@@ -27,7 +28,7 @@ async function fetchPlayer(slug: string): Promise<PlayerFull | null> {
   if (!slug) return null;
   const { data } = await supabase
     .from('players')
-    .select('id, nickname, slug, elo_rating, peak_elo, total_tournaments, total_first_places, total_podiums, total_final_tables, first_seen, last_seen, countries(name, flag_emoji)')
+    .select('id, nickname, slug, elo_rating, peak_elo, total_tournaments, total_first_places, total_podiums, total_final_tables, first_seen, last_seen, countries(name, code, flag_emoji)')
     .eq('slug', slug)
     .eq('is_active', true)
     .single();
@@ -314,7 +315,12 @@ const statRows: StatRow[] = [
           <div class="sel-avatar sel-avatar-a">{playerA.nickname.slice(0,2).toUpperCase()}</div>
           <div class="sel-info">
             <span class="sel-nick">{playerA.nickname}</span>
-            <span class="sel-country">{playerA.countries?.flag_emoji} {playerA.countries?.name ?? '—'}</span>
+            <span class="sel-country">
+  {playerA.countries?.code ? (
+    <CountryFlag countryCode={playerA.countries.code} size={16} />
+  ) : null}
+  {playerA.countries?.name ?? '—'}
+</span>
           </div>
           <a href={`/comparar?a=&b=${slugB}`} class="sel-clear">✕</a>
         </div>
@@ -340,7 +346,12 @@ const statRows: StatRow[] = [
           <div class="sel-avatar sel-avatar-b">{playerB.nickname.slice(0,2).toUpperCase()}</div>
           <div class="sel-info">
             <span class="sel-nick">{playerB.nickname}</span>
-            <span class="sel-country">{playerB.countries?.flag_emoji} {playerB.countries?.name ?? '—'}</span>
+            <span class="sel-country">
+  {playerB.countries?.code ? (
+    <CountryFlag countryCode={playerB.countries.code} size={16} />
+  ) : null}
+  {playerB.countries?.name ?? '—'}
+</span>
           </div>
           <a href={`/comparar?a=${slugA}&b=`} class="sel-clear">✕</a>
         </div>
@@ -365,7 +376,12 @@ const statRows: StatRow[] = [
           <div class="phc-avatar phc-a">{playerA.nickname.slice(0,2).toUpperCase()}</div>
           <div class="phc-data">
             <a href={`/jugador/${playerA.slug}`} class="phc-nick">{playerA.nickname}</a>
-            <div class="phc-country">{playerA.countries?.flag_emoji} {playerA.countries?.name ?? '—'}</div>
+            <div class="phc-country">
+  {playerA.countries?.code ? (
+    <CountryFlag countryCode={playerA.countries.code} size={16} />
+  ) : null}
+  {playerA.countries?.name ?? '—'}
+</div>
             <div class={`phc-tier ${tier(playerA.elo_rating).cls}`}>{tier(playerA.elo_rating).label}</div>
           </div>
           <div class="phc-elo">
@@ -394,7 +410,12 @@ const statRows: StatRow[] = [
           </div>
           <div class="phc-data phc-data-right">
             <a href={`/jugador/${playerB.slug}`} class="phc-nick">{playerB.nickname}</a>
-            <div class="phc-country">{playerB.countries?.flag_emoji} {playerB.countries?.name ?? '—'}</div>
+            <div class="phc-country">
+  {playerB.countries?.code ? (
+    <CountryFlag countryCode={playerB.countries.code} size={16} />
+  ) : null}
+  {playerB.countries?.name ?? '—'}
+</div>
             <div class={`phc-tier ${tier(playerB.elo_rating).cls}`}>{tier(playerB.elo_rating).label}</div>
           </div>
           <div class="phc-avatar phc-b">{playerB.nickname.slice(0,2).toUpperCase()}</div>
@@ -628,7 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // Llamada directa a Supabase REST API — no depende de ningún endpoint propio
           const url = supabaseUrl
             + '/rest/v1/players'
-            + '?select=nickname,slug,elo_rating,countries(flag_emoji,name)'
+            + '?select=nickname,slug,elo_rating,countries(flag_emoji,code,name)'
             + '&nickname=ilike.*' + encodeURIComponent(q) + '*'
             + '&is_active=eq.true'
             + '&order=elo_rating.desc'
@@ -668,9 +689,17 @@ document.addEventListener('DOMContentLoaded', () => {
             nick.className = 'sd-nick';
             nick.textContent = p.nickname.toUpperCase();
 
-            const fl       = document.createElement('span');
-            fl.className   = 'sd-flag';
-            fl.textContent = flag;
+            const fl = document.createElement('img');
+fl.className = 'sd-flag';
+const code = (p.countries && p.countries.code) ? p.countries.code.toLowerCase() : '';
+if (code) {
+  fl.src = `https://flagcdn.com/w40/${code}.png`;
+  fl.alt = code.toUpperCase();
+  fl.width = 20;
+  fl.height = 15;
+} else {
+  fl.style.display = 'none';
+}
 
             const elo      = document.createElement('span');
             elo.className  = 'sd-elo';

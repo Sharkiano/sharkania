@@ -1,6 +1,7 @@
 ---
 // src/pages/club/[slug].astro
 import PublicLayout from '@layouts/PublicLayout.astro';
+import CountryFlag from '@components/CountryFlag.astro';
 import { createServerClient } from '@lib/supabase/server';
 
 const { slug } = Astro.params;
@@ -48,7 +49,7 @@ const { data: topPlayersRaw } = await supabase
   .from('tournament_results')
   .select(`
     players ( id, nickname, slug, elo_rating, total_podiums, total_tournaments,
-              countries ( flag_emoji, name ) ),
+              countries ( flag_emoji, code, name ) ),
     tournaments!inner ( club_id )
   `)
   .eq('tournaments.club_id', club.id);
@@ -63,6 +64,7 @@ type PlayerEntry = {
   total_tournaments: number;
   flag: string;
   country: string;
+  countryCode: string;
   clubTournaments: number;
 };
 
@@ -72,7 +74,7 @@ const playerMap = new Map<number, PlayerEntry>();
   const p = row.players as {
     id: number; nickname: string; slug: string; elo_rating: number;
     total_podiums: number; total_tournaments: number;
-    countries: { flag_emoji: string; name: string } | null;
+    countries: { flag_emoji: string; code: string; name: string } | null;
   } | null;
   if (!p) return;
 
@@ -88,6 +90,7 @@ const playerMap = new Map<number, PlayerEntry>();
       total_tournaments: p.total_tournaments ?? 0,
       flag:             p.countries?.flag_emoji ?? '',
       country:          p.countries?.name ?? '',
+      countryCode:      p.countries?.code ?? '', 
       clubTournaments:  1,
     });
   }
@@ -176,10 +179,13 @@ const processedPlayers = topPlayers.map((p, i) => ({
         <div class="club-identity">
           <div class="club-meta-top">
             {country && (
-              <span class="club-country-badge">
-                {country.flag_emoji} {country.name}
-              </span>
-            )}
+  <span class="club-country-badge">
+    {country.code ? (
+      <CountryFlag countryCode={country.code} size={18} />
+    ) : null}
+    {country.name}
+  </span>
+)}
             {room && (
               <span class="club-room-badge">{room.name}</span>
             )}
@@ -312,7 +318,11 @@ const processedPlayers = topPlayers.map((p, i) => ({
                 }>{String(p.rank).padStart(2,'0')}</span>
               </div>
               <div class="p-cell">
-                {p.flag && <span class="p-flag">{p.flag}</span>}
+                <span class="p-flag">
+  {p.countryCode ? (
+    <CountryFlag countryCode={p.countryCode} size={20} />
+  ) : null}
+</span>
                 <div class="p-info">
                   <span class="p-nick">{p.nickname}</span>
                   {p.country && <span class="p-country">{p.country}</span>}
