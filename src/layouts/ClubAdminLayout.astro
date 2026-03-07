@@ -1,5 +1,6 @@
 ---
 // src/layouts/ClubAdminLayout.astro
+import '../styles/global.css';
 interface Props {
   title: string;
   clubName?: string;
@@ -23,7 +24,6 @@ const navItems = [
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} — Club Admin | Sharkania</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="stylesheet" href="/src/styles/global.css" />
   <meta name="robots" content="noindex, nofollow" />
 </head>
 <body class="admin-body">
