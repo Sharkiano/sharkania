@@ -1,0 +1,11 @@
+name = "sharkania"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+PUBLIC_SITE_URL = "https://sharkania.pages.dev"
+```
+
+**2. Agrega la variable faltante** en Cloudflare → Settings → Environment variables → Edit:
+```
+PUBLIC_SITE_URL → https://sharkania.pages.dev
