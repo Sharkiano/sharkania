@@ -14,7 +14,7 @@ const { data: league } = await supabase
   .from('leagues')
   .select(`
     *,
-    clubs ( name, slug, countries ( name, flag_emoji ) )
+    clubs ( name, slug, countries ( name, code, flag_emoji ) )
   `)
   .eq('slug', leagueSlug)
   .eq('is_active', true)
@@ -27,7 +27,7 @@ const { data: standings } = await supabase
   .from('league_standings')
   .select(`
     total_points, tournaments_played, best_position, average_position,
-    players ( id, nickname, slug, elo_rating, countries ( name, flag_emoji ) )
+    players ( id, nickname, slug, elo_rating, countries ( name, code, flag_emoji ) )
   `)
   .eq('league_id', league.id)
   .order('total_points', { ascending: false });
@@ -41,7 +41,7 @@ const { data: tournaments } = await supabase
   .order('date', { ascending: false });
 
 // ── Tipos ─────────────────────────────────
-const club    = league.clubs as { name: string; slug: string; countries: { name: string; flag_emoji: string } | null } | null;
+const club = league.clubs as { name: string; slug: string; countries: { name: string; code: string; flag_emoji: string } | null } | null;
 const scoring = league.scoring_system as {
   points?: Record<string, number>;
   participationPoints?: number;
@@ -76,7 +76,7 @@ function rowClass(rank: number): string {
 // ── Pre-procesar standings ─────────────────
 type PlayerRel = {
   id: number; nickname: string; slug: string; elo_rating: number;
-  countries: { name: string; flag_emoji: string } | null;
+  countries: { name: string; code: string; flag_emoji: string } | null;
 } | null;
 
 const processedStandings = (standings ?? []).map((s, i) => {
@@ -93,6 +93,7 @@ const processedStandings = (standings ?? []).map((s, i) => {
     playerElo:    p?.elo_rating ?? 1200,
     countryFlag:  p?.countries?.flag_emoji ?? '',
     countryName:  p?.countries?.name ?? '',
+    countryCode:  p?.countries?.code ?? '',
     badge,
     totalPoints:  Number(s.total_points ?? 0).toFixed(1),
     tournsPlayed: s.tournaments_played ?? 0,
@@ -156,10 +157,13 @@ const leader           = processedStandings[0];
         <div class="league-identity">
           <div class="league-meta-top">
             {club && (
-              <a href={`/club/${club.slug}`} class="club-badge">
-                {club.countries?.flag_emoji} {club.name}
-              </a>
-            )}
+  <a href={`/club/${club.slug}`} class="club-badge">
+    {club.countries?.code ? (
+      <CountryFlag countryCode={club.countries.code} size={14} />
+    ) : null}
+    {club.name}
+  </a>
+)}
             <span class={league.is_active ? 'status-badge active' : 'status-badge inactive'}>
               {league.is_active ? 'ACTIVA' : 'FINALIZADA'}
             </span>
@@ -186,8 +190,11 @@ const leader           = processedStandings[0];
           <div class="leader-display">
             <div class="leader-label">LÍDER</div>
             <a href={`/jugador/${leader.playerSlug}`} class="leader-nick">
-              {leader.countryFlag} {leader.playerNick}
-            </a>
+  {leader.countryCode ? (
+    <CountryFlag countryCode={leader.countryCode} size={18} />
+  ) : null}
+  {leader.playerNick}
+</a>
             <div class="leader-pts">{leader.totalPoints}</div>
             <div class="leader-pts-label">PUNTOS</div>
           </div>
@@ -259,7 +266,11 @@ const leader           = processedStandings[0];
               <span class={s.rankCls}>{s.rankStr}</span>
             </div>
             <div class="p-cell">
-              {s.countryFlag && <span class="p-flag">{s.countryFlag}</span>}
+              <span class="p-flag">
+  {s.countryCode ? (
+    <CountryFlag countryCode={s.countryCode} size={20} />
+  ) : null}
+</span>
               <div class="p-info">
                 <span class="p-nick">{s.playerNick}</span>
                 {s.countryName && <span class="p-country">{s.countryName}</span>}
