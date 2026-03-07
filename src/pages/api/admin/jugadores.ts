@@ -42,8 +42,11 @@ export const PATCH: APIRoute = async ({ request }) => {
   const body = await request.json() as {
     id?: number;
     nickname?: string;
+    full_name?: string | null;
     country_id?: number | null;
     is_active?: boolean;
+    email?: string | null;
+    whatsapp?: string | null;
   };
 
   if (!body.id) {
@@ -56,7 +59,9 @@ export const PATCH: APIRoute = async ({ request }) => {
   if (body.nickname   !== undefined) updates.nickname   = body.nickname.trim();
   if (body.country_id !== undefined) updates.country_id = body.country_id || null;
   if (body.is_active  !== undefined) updates.is_active  = body.is_active;
-
+  if (body.full_name  !== undefined) updates.full_name  = body.full_name || null;
+  if (body.email      !== undefined) updates.email      = body.email || null;
+  if (body.whatsapp   !== undefined) updates.whatsapp   = body.whatsapp || null;
   const { data, error } = await supabase
     .from('players')
     .update(updates)

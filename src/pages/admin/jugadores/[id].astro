@@ -94,6 +94,11 @@ const badge = getEloBadge(player.elo_rating ?? 1200);
       </div>
 
       <div class="form-group" style="margin-top:1rem;">
+        <label for="full_name" class="form-label">Nombre completo</label>
+        <input type="text" id="full_name" class="input-field" value={player.full_name ?? ''} placeholder="Ej: Juan Pérez" maxlength="150" />
+      </div>
+
+      <div class="form-group" style="margin-top:1rem;">
         <label for="country_id" class="form-label">País</label>
         <select id="country_id" class="input-field select-field">
           <option value="">— Sin país —</option>
@@ -103,6 +108,16 @@ const badge = getEloBadge(player.elo_rating ?? 1200);
             </option>
           ))}
         </select>
+      </div>
+
+      <div class="form-group" style="margin-top:1rem;">
+        <label for="email" class="form-label">Email</label>
+        <input type="email" id="email" class="input-field" value={player.email ?? ''} placeholder="jugador@email.com" />
+      </div>
+
+      <div class="form-group" style="margin-top:1rem;">
+        <label for="whatsapp" class="form-label">WhatsApp</label>
+        <input type="text" id="whatsapp" class="input-field" value={player.whatsapp ?? ''} placeholder="+54 9 11 1234-5678" />
       </div>
 
       <div class="form-error" id="form-error" role="alert"></div>
@@ -438,8 +453,10 @@ const badge = getEloBadge(player.elo_rating ?? 1200);
 // ── Guardar cambios ──────────────────────────────────────
 document.getElementById('btn-guardar')?.addEventListener('click', async () => {
   const nickname   = document.getElementById('nickname').value.trim();
+  const full_name  = document.getElementById('full_name').value.trim() || null;
   const country_id = Number(document.getElementById('country_id').value) || null;
-  const err        = document.getElementById('form-error');
+  const email      = document.getElementById('email').value.trim() || null;
+  const whatsapp   = document.getElementById('whatsapp').value.trim() || null;
 
   err.classList.remove('is-visible');
   if (!nickname) { err.textContent = 'El nickname es requerido.'; err.classList.add('is-visible'); return; }
@@ -447,7 +464,7 @@ document.getElementById('btn-guardar')?.addEventListener('click', async () => {
   const res  = await fetch('/api/admin/jugadores', {
     method:  'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ id: playerId, nickname, country_id }),
+    body:    JSON.stringify({ id: playerId, nickname, full_name, country_id, email, whatsapp }),
   });
   const data = await res.json();
   if (!res.ok || data.error) { err.textContent = data.error ?? 'Error.'; err.classList.add('is-visible'); return; }

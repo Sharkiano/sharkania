@@ -7,8 +7,14 @@ const supabase = createServerClient();
 
 const { data: admins } = await supabase
   .from('admin_profiles')
-  .select('*, clubs ( name )')
+  .select('id, name, email, role, club_id, is_active, last_login, created_at, clubs ( name )')
   .order('created_at', { ascending: false });
+
+const { data: clubs } = await supabase
+  .from('clubs')
+  .select('id, name')
+  .eq('is_active', true)
+  .order('name');
 
 const activeCount   = admins?.filter(a => a.is_active).length  ?? 0;
 const inactiveCount = admins?.filter(a => !a.is_active).length ?? 0;
@@ -75,24 +81,34 @@ const inactiveCount = admins?.filter(a => !a.is_active).length ?? 0;
                 </td>
                 <td>
                   <div class="action-btns">
-                    <button
-                      class={`action-btn ${admin.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
-                      data-id={admin.id}
-                      data-active={String(admin.is_active)}
-                      data-role={admin.role}
-                      onclick="toggleAdmin(this)"
-                      aria-label={admin.is_active ? 'Desactivar' : 'Activar'}
-                    >{admin.is_active ? '⏸' : '▶'}</button>
-                    {admin.role !== 'super_admin' && (
-                      <button
-                        class="action-btn action-btn--danger"
-                        data-id={admin.id}
-                        data-name={admin.name}
-                        onclick="deleteAdmin(this)"
-                        aria-label={`Eliminar ${admin.name}`}
-                      >🗑</button>
-                    )}
-                  </div>
+  <button
+    class={`action-btn ${admin.is_active ? 'action-btn--warning' : 'action-btn--success'}`}
+    data-id={admin.id}
+    data-active={String(admin.is_active)}
+    data-role={admin.role}
+    onclick="toggleAdmin(this)"
+    aria-label={admin.is_active ? 'Desactivar' : 'Activar'}
+  >{admin.is_active ? '⏸' : '▶'}</button>
+  {admin.role !== 'super_admin' && (
+    <button
+      class="action-btn action-btn--info"
+      data-id={admin.id}
+      data-name={admin.name}
+      data-club={String((admin.clubs as { name: string } | null) ? (admin as any).club_id ?? '' : '')}
+      onclick="openEditModal(this)"
+      aria-label={`Editar ${admin.name}`}
+    >✏️</button>
+  )}
+  {admin.role !== 'super_admin' && (
+    <button
+      class="action-btn action-btn--danger"
+      data-id={admin.id}
+      data-name={admin.name}
+      onclick="deleteAdmin(this)"
+      aria-label={`Eliminar ${admin.name}`}
+    >🗑</button>
+  )}
+</div>
                 </td>
               </tr>
             );
@@ -112,6 +128,29 @@ const inactiveCount = admins?.filter(a => !a.is_active).length ?? 0;
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Modal editar admin -->
+  <div class="modal-overlay" id="edit-modal" style="display:none;">
+    <div class="modal-box glass-card">
+      <h3 class="modal-title">Editar Admin</h3>
+      <p class="modal-subtitle" id="modal-admin-name"></p>
+
+      <div class="form-group" style="margin-top:1rem;">
+        <label class="form-label">Club asignado</label>
+        <select id="modal-club-id" class="input-field select-field">
+          <option value="">— Sin club —</option>
+          {clubs?.map(c => (
+            <option value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-actions" style="margin-top:1.25rem;">
+        <button class="btn btn-secondary" onclick="closeEditModal()">Cancelar</button>
+        <button class="btn btn-primary" id="modal-save-btn" onclick="saveEdit()">Guardar</button>
+      </div>
+    </div>
+  </div>
 
 </AdminLayout>
 
@@ -166,6 +205,33 @@ const inactiveCount = admins?.filter(a => !a.is_active).length ?? 0;
   color: #00cec9;
   border: 1px solid rgba(0, 206, 201, 0.25);
 }
+
+.action-btn--info {
+  color: #448aff;
+  border-color: rgba(68, 138, 255, 0.3);
+}
+.action-btn--info:hover {
+  background: rgba(68, 138, 255, 0.1);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-box {
+  width: 100%;
+  max-width: 420px;
+  padding: 1.75rem;
+}
+.modal-title    { font-size: 1.1rem; font-weight: 700; color: #e4e4ef; margin: 0 0 0.25rem; }
+.modal-subtitle { font-size: 0.85rem; color: #8888a4; margin: 0; }
+.select-field { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888a4' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.select-field option { background: #12121a; color: #e4e4ef; }
 </style>
 
 <script>
@@ -248,6 +314,57 @@ function showToast(msg: string, type: 'success' | 'error') {
   setTimeout(() => toast.classList.remove('is-visible'), 3000);
 }
 
-(window as unknown as Record<string, unknown>).toggleAdmin = toggleAdmin;
-(window as unknown as Record<string, unknown>).deleteAdmin = deleteAdmin;
+let editingId = '';
+
+function openEditModal(btn: HTMLElement) {
+  editingId = btn.dataset.id!;
+  const name   = btn.dataset.name ?? '';
+  const clubId = btn.dataset.club ?? '';
+
+  (document.getElementById('modal-admin-name') as HTMLElement).textContent = name;
+  (document.getElementById('modal-club-id') as HTMLSelectElement).value = clubId;
+  (document.getElementById('edit-modal') as HTMLElement).style.display = 'flex';
+}
+
+function closeEditModal() {
+  (document.getElementById('edit-modal') as HTMLElement).style.display = 'none';
+  editingId = '';
+}
+
+async function saveEdit() {
+  const club_id = Number((document.getElementById('modal-club-id') as HTMLSelectElement).value) || null;
+  const saveBtn = document.getElementById('modal-save-btn') as HTMLButtonElement;
+
+  saveBtn.disabled    = true;
+  saveBtn.textContent = 'Guardando...';
+
+  try {
+    const res  = await fetch('/api/admin/admins', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: editingId, club_id }),
+    });
+    const data = await res.json() as { error?: string };
+
+    if (!res.ok || data.error) {
+      showToast(data.error ?? 'Error al guardar.', 'error');
+      return;
+    }
+
+    showToast('Club actualizado correctamente.', 'success');
+    closeEditModal();
+    setTimeout(() => window.location.reload(), 800);
+  } catch {
+    showToast('Error de conexión.', 'error');
+  } finally {
+    saveBtn.disabled    = false;
+    saveBtn.textContent = 'Guardar';
+  }
+}
+
+(window as unknown as Record<string, unknown>).toggleAdmin    = toggleAdmin;
+(window as unknown as Record<string, unknown>).deleteAdmin    = deleteAdmin;
+(window as unknown as Record<string, unknown>).openEditModal  = openEditModal;
+(window as unknown as Record<string, unknown>).closeEditModal = closeEditModal;
+(window as unknown as Record<string, unknown>).saveEdit       = saveEdit;
 </script>
