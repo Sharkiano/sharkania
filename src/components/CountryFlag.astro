@@ -1,0 +1,19 @@
+---
+// src/components/CountryFlag.astro
+interface Props {
+  countryCode: string;  // "AR", "BR", "US", etc.
+  size?: number;
+}
+
+const { countryCode, size = 20 } = Astro.props;
+const code = countryCode.toLowerCase();
+---
+
+<img
+  src={`https://flagcdn.com/w40/${code}.png`}
+  alt={countryCode}
+  width={size}
+  height={Math.round(size * 0.75)}
+  class="inline-block align-middle"
+  loading="lazy"
+/>

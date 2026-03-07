@@ -19,6 +19,7 @@
     "@supabase/supabase-js": "^2.98.0",
     "astro": "^5.17.1",
     "chart.js": "^4.5.1",
+    "flag-icons": "^7.5.0",
     "papaparse": "^5.5.3",
     "typescript": "^5.9.3"
   },
