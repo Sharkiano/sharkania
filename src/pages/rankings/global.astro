@@ -23,16 +23,6 @@ const { data: players, count } = await supabase
 const totalPages  = Math.ceil((count ?? 0) / limit);
 const pageNumbers = Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1);
 
-// Convertir código de país a emoji de bandera
-function countryCodeToFlag(code: string): string {
-  if (!code || code.length !== 2) return '';
-  const codePoints = code
-    .toUpperCase()
-    .split('')
-    .map(char => 127397 + char.charCodeAt(0));
-  return String.fromCodePoint(...codePoints);
-}
-
 function getEloBadge(elo: number) {
   if (elo >= 1800) return { cls: 'tier-legend',  label: 'LEGEND'  };
   if (elo >= 1600) return { cls: 'tier-master',  label: 'MASTER'  };
@@ -105,7 +95,7 @@ function rankClass(tc: string) {
             <a href={`/jugador/${p.slug}`} class={`t-row ${tc}`}>
               <div><span class={rc}>{rankNum(i)}</span></div>
               <div class="p-cell">
-                <span class="p-flag">{country?.code ? countryCodeToFlag(country.code) : ''}</span>
+                <span class="p-flag">{country?.flag_emoji ?? ''}</span>
                 <div class="p-info">
                   <span class="p-nick">{p.nickname}</span>
                   <span class="p-country">{country?.name ?? ''}</span>
