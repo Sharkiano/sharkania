@@ -94,12 +94,16 @@ const contactInfo = (club.contact_info ?? {}) as Record<string, string>;
 
     <div class="form-grid">
       <div class="form-group">
-        <label for="telegram" class="form-label">📱 Telegram</label>
-        <input type="text" id="telegram" class="input-field" value={contactInfo.telegram ?? ''} placeholder="@sharkclub" />
+        <label for="email" class="form-label">📧 Email</label>
+        <input type="email" id="email" class="input-field" value={contactInfo.email ?? ''} placeholder="contacto@club.com" />
       </div>
       <div class="form-group">
         <label for="whatsapp" class="form-label">💬 WhatsApp</label>
         <input type="text" id="whatsapp" class="input-field" value={contactInfo.whatsapp ?? ''} placeholder="+54 9 11 1234-5678" />
+      </div>
+      <div class="form-group">
+        <label for="telegram" class="form-label">📱 Telegram</label>
+        <input type="text" id="telegram" class="input-field" value={contactInfo.telegram ?? ''} placeholder="@sharkclub" />
       </div>
       <div class="form-group">
         <label for="instagram" class="form-label">📷 Instagram</label>
@@ -143,6 +147,7 @@ btnGuardar?.addEventListener('click', async () => {
   const description = document.getElementById('description').value.trim();
   const country_id  = Number(document.getElementById('country_id').value) || null;
   const room_id     = Number(document.getElementById('room_id').value)    || null;
+  const email       = document.getElementById('email').value.trim();
   const telegram    = document.getElementById('telegram').value.trim();
   const whatsapp    = document.getElementById('whatsapp').value.trim();
   const instagram   = document.getElementById('instagram').value.trim();
@@ -166,6 +171,7 @@ btnGuardar?.addEventListener('click', async () => {
 
   try {
     const contact_info = {};
+    if (email)     contact_info.email     = email;
     if (telegram)  contact_info.telegram  = telegram;
     if (whatsapp)  contact_info.whatsapp  = whatsapp;
     if (instagram) contact_info.instagram = instagram;

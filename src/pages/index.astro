@@ -95,6 +95,10 @@ const rows: RowItem[] = (players ?? []).map((p: any, i: number) => {
     Sistema ELO · Torneos · Ligas · Clasificación global unificada.
   </p>
 
+  <a href="/unirse" class="join-cta">
+    🃏 Quiero que mi Club sea parte de Sharkania
+  </a>
+
   <div class="hero-search-wrap">
     <form action="/buscar" method="get" class="search-crystal">
       <input
@@ -230,6 +234,30 @@ const rows: RowItem[] = (players ?? []).map((p: any, i: number) => {
   border-radius: 50%;
   box-shadow: 0 0 8px var(--accent2), 0 0 16px rgba(0,229,255,0.5);
   animation: pulse 1.8s infinite;
+}
+
+.join-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, rgba(41,121,255,0.15), rgba(0,229,255,0.08));
+  border: 1px solid rgba(41,121,255,0.35);
+  border-radius: 50px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.85);
+  text-decoration: none;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+  animation: fadeDown 0.8s 0.2s ease both;
+}
+.join-cta:hover {
+  background: linear-gradient(135deg, rgba(41,121,255,0.25), rgba(0,229,255,0.15));
+  border-color: rgba(0,229,255,0.5);
+  transform: translateY(-2px);
 }
 
 @keyframes pulse {

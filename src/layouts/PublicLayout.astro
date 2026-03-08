@@ -173,6 +173,11 @@ const titleFull  = title.includes('Sharkania') ? title : `${title} — Sharkania
         REALIZADO POR <a href="https://clerigopoker.com/" target="_blank" rel="noopener" class="footer-credit">CLERIGOPOKER</a>
         Y <a href="https://brujulamarketing.cl/" target="_blank" rel="noopener" class="footer-credit">BRUJULAMARKETING.CL</a>
       </div>
+      <div class="footer-support">
+        <a href="https://ko-fi.com/sharkania" target="_blank" rel="noopener" class="support-btn">
+          ☕ Apoya el proyecto
+        </a>
+      </div>
     </div>
   </footer>
 
@@ -923,6 +928,33 @@ main { position: relative; z-index: 1; padding-top: var(--nav-h); }
 }
 .footer-copy {
   color: rgba(255,255,255,0.45);
+}
+.footer-support {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: center;
+}
+
+.support-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 7px 16px;
+  background: rgba(255, 94, 58, 0.1);
+  border: 1px solid rgba(255, 94, 58, 0.3);
+  border-radius: 20px;
+  color: #ff5e3a;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.support-btn:hover {
+  background: rgba(255, 94, 58, 0.18);
+  border-color: rgba(255, 94, 58, 0.55);
 }
 
 </style>
